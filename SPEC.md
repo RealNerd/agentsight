@@ -140,6 +140,40 @@ Updates in-place as new entries appear in the JSONL file. Exits when the session
 - `--idle-timeout <seconds>` — Exit after N seconds of inactivity (default: 300)
 - `--json` — Stream JSON lines instead of TUI
 
+### `agentsight timeline` (planned)
+
+Visualize concurrent session activity to help evaluate usage patterns when multi-tasking across projects. Many CC users run 4-5 sessions simultaneously — this command reveals whether that pattern is efficient or wasteful.
+
+```
+$ agentsight timeline --days 1
+
+ 13:00  14:00  15:00  16:00  17:00  18:00  19:00  20:00  21:00  22:00
+ goldthread   ████████████████████████████████████████████████████████████
+ extraction        ██   █████████    ████████████████   ██████    ████████████
+ fairbound            ██████  ███████  ██████  ████████████  ████████  ████████
+ fanscloud        ████████
+ llc                       █████████████
+ agentsight                                                          █████████
+
+ ── Concurrency ────────────────────────────────────
+ Peak concurrent sessions:     5  (13:48 — 14:09)
+ Avg concurrent sessions:      2.8
+ Total tokens during peak:     12,847,203
+
+ ── Efficiency by Concurrency Level ────────────────
+ 1 session:   avg 14.2M tokens/session   avg cache hit 96.1%
+ 2 sessions:  avg 15.8M tokens/session   avg cache hit 94.3%
+ 3 sessions:  avg 17.1M tokens/session   avg cache hit 92.0%
+ 4+ sessions: avg 19.4M tokens/session   avg cache hit 88.7%
+```
+
+**Key insight:** Each concurrent session maintains its own context window and cache. Running N sessions simultaneously means N independent cache warm-ups. This command quantifies whether parallelism costs more tokens per session than sequential work, helping users decide when multi-tasking is worth it vs. focusing on one project at a time.
+
+**Flags:**
+- `--days <N>` — How far back to look (default: 1)
+- `--project <path>` — Highlight a specific project in the timeline
+- `--json` — Output as JSON
+
 ### Global Flags
 
 - `--json` — Machine-readable JSON output (all commands)
@@ -164,7 +198,8 @@ agentsight/
 │   │   ├── sessions.rs           # List sessions
 │   │   ├── session.rs            # Single session detail
 │   │   ├── summary.rs            # Cross-session aggregation
-│   │   └── watch.rs              # Live file watcher
+│   │   ├── watch.rs              # Live file watcher
+│   │   └── timeline.rs           # (planned) Concurrent session visualization
 │   ├── parser/                   # JSONL parsing layer
 │   │   ├── mod.rs
 │   │   ├── types.rs              # Serde structs matching JSONL schema
@@ -282,7 +317,7 @@ cargo build --release      # Release build succeeds
 - Before adding any network features (telemetry, update checks, cloud sync)
 - Before adding interactive/TUI features beyond the watch command
 - Before changing the config file format or location
-- Before adding subcommands beyond the four specified
+- Before adding subcommands beyond the five specified (sessions, session, summary, watch, timeline)
 
 ### Never Do
 - Never read or transmit code content from session logs — only metadata and token counts
