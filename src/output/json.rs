@@ -1,0 +1,136 @@
+use serde::Serialize;
+
+use crate::cost::CostBreakdown;
+use crate::parser::types::SessionSummary;
+use std::collections::HashMap;
+
+#[derive(Serialize)]
+pub struct SessionListJson {
+    pub sessions: Vec<SessionJson>,
+    pub total_tokens: u64,
+    pub session_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost: Option<f64>,
+}
+
+#[derive(Serialize)]
+pub struct SessionJson {
+    pub session_id: String,
+    pub slug: Option<String>,
+    pub project: String,
+    pub model: Option<String>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub turns: usize,
+    pub tokens: TokensJson,
+    pub cache_hit_ratio: f64,
+    pub tool_calls: HashMap<String, u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<CostJson>,
+}
+
+#[derive(Serialize)]
+pub struct CostJson {
+    pub input: f64,
+    pub cache_creation: f64,
+    pub cache_read: f64,
+    pub output: f64,
+    pub total: f64,
+}
+
+#[derive(Serialize)]
+pub struct TokensJson {
+    pub input: u64,
+    pub cache_creation: u64,
+    pub cache_read: u64,
+    pub output: u64,
+    pub total: u64,
+}
+
+impl From<&CostBreakdown> for CostJson {
+    fn from(c: &CostBreakdown) -> Self {
+        CostJson {
+            input: c.input_cost,
+            cache_creation: c.cache_creation_cost,
+            cache_read: c.cache_read_cost,
+            output: c.output_cost,
+            total: c.total(),
+        }
+    }
+}
+
+fn session_to_json(
+    summary: &SessionSummary,
+    cost: &CostBreakdown,
+    cache_hit: f64,
+    show_cost: bool,
+) -> SessionJson {
+    SessionJson {
+        session_id: summary.session_id.clone(),
+        slug: summary.slug.clone(),
+        project: summary.project_path.clone(),
+        model: summary.model.clone(),
+        start_time: summary.start_time.map(|t| t.to_rfc3339()),
+        end_time: summary.end_time.map(|t| t.to_rfc3339()),
+        turns: summary.turns.len(),
+        tokens: TokensJson {
+            input: summary.total_usage.input_tokens,
+            cache_creation: summary.total_usage.cache_creation_input_tokens,
+            cache_read: summary.total_usage.cache_read_input_tokens,
+            output: summary.total_usage.output_tokens,
+            total: summary.total_usage.total_tokens(),
+        },
+        cache_hit_ratio: cache_hit,
+        tool_calls: summary.tool_calls.clone(),
+        cost: if show_cost {
+            Some(CostJson::from(cost))
+        } else {
+            None
+        },
+    }
+}
+
+/// Print a single session as JSON to stdout.
+pub fn print_session_json(
+    summary: &SessionSummary,
+    cost: &CostBreakdown,
+    cache_hit: f64,
+    show_cost: bool,
+) {
+    let json = session_to_json(summary, cost, cache_hit, show_cost);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+/// Print a list of sessions as JSON to stdout.
+pub fn print_sessions_json(items: &[(SessionSummary, CostBreakdown, f64)], show_cost: bool) {
+    let sessions: Vec<SessionJson> = items
+        .iter()
+        .map(|(s, c, hit)| session_to_json(s, c, *hit, show_cost))
+        .collect();
+
+    let total_tokens: u64 = items
+        .iter()
+        .map(|(s, _, _)| s.total_usage.total_tokens())
+        .sum();
+
+    let total_cost = if show_cost {
+        Some(items.iter().map(|(_, c, _)| c.total()).sum())
+    } else {
+        None
+    };
+
+    let list = SessionListJson {
+        session_count: sessions.len(),
+        total_tokens,
+        total_cost,
+        sessions,
+    };
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&list).unwrap_or_default()
+    );
+}
