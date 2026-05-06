@@ -198,13 +198,22 @@ impl SessionCache {
             .cloned()
     }
 
-    /// Get a single session by slug match.
-    pub async fn get_by_slug(&self, slug: &str) -> Option<Arc<CachedSession>> {
+    /// Get the most recent session matching a slug (exact or substring).
+    /// When multiple sessions share a slug, returns the one with the latest start_time.
+    pub async fn get_by_slug_best(&self, slug: &str) -> Option<Arc<CachedSession>> {
         let inner = self.inner.read().await;
+        let slug_lower = slug.to_lowercase();
+
         inner
             .sessions
             .values()
-            .find(|cs| cs.summary.slug.as_deref() == Some(slug))
+            .filter(|cs| {
+                cs.summary.slug.as_deref().is_some_and(|s| {
+                    let s_lower = s.to_lowercase();
+                    s_lower == slug_lower || s_lower.contains(&slug_lower)
+                })
+            })
+            .max_by_key(|cs| cs.summary.start_time)
             .cloned()
     }
 

@@ -256,6 +256,28 @@ pub fn format_idle_duration(secs: u64) -> String {
     }
 }
 
+/// Build a display label for a session, appending a short ID prefix when
+/// multiple rows share the same slug to disambiguate them.
+fn session_label(row: &WatchRow, all_rows: &[WatchRow]) -> String {
+    let base = row
+        .slug
+        .as_deref()
+        .unwrap_or_else(|| &row.session_id[..8.min(row.session_id.len())]);
+
+    // Check if any other row has the same slug
+    let slug_collides = row.slug.is_some()
+        && all_rows
+            .iter()
+            .any(|r| r.slug == row.slug && r.session_id != row.session_id);
+
+    if slug_collides {
+        let prefix = &row.session_id[..4.min(row.session_id.len())];
+        format!("{} ({})", base, prefix)
+    } else {
+        base.to_string()
+    }
+}
+
 /// Render the watch table with a Status column.
 pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
     if rows.is_empty() {
@@ -277,16 +299,13 @@ pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
 
     for row in rows {
         let project = shorten_project(&row.project);
-        let session = row
-            .slug
-            .as_deref()
-            .unwrap_or_else(|| &row.session_id[..8.min(row.session_id.len())]);
+        let session = session_label(row, rows);
         let model = row.model.as_deref().unwrap_or("unknown");
 
         if show_cost {
             table.add_row(vec![
                 Cell::new(&project),
-                Cell::new(session),
+                Cell::new(&session),
                 Cell::new(format_tokens(row.tokens)),
                 Cell::new(row.turns.to_string()),
                 Cell::new(format_percent(row.cache_hit)),
@@ -297,7 +316,7 @@ pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
         } else {
             table.add_row(vec![
                 Cell::new(&project),
-                Cell::new(session),
+                Cell::new(&session),
                 Cell::new(format_tokens(row.tokens)),
                 Cell::new(row.turns.to_string()),
                 Cell::new(format_percent(row.cache_hit)),

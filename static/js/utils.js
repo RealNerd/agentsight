@@ -32,7 +32,7 @@ function formatDateTime(isoString) {
 }
 
 function shortenModel(model) {
-    if (!model) return 'unknown';
+    if (!model || model === '<synthetic>') return 'unknown';
     const idx = model.lastIndexOf('-20');
     if (idx > 0 && model.length > 20) return model.substring(0, idx);
     return model;

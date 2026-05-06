@@ -54,26 +54,60 @@ fn find_by_slug(
     config: &Config,
     args: &SessionArgs,
 ) -> Result<()> {
+    // Collect all sessions that match by slug (exact, then substring).
+    // When multiple sessions share a slug (e.g. plan mode → implementation),
+    // pick the most recent one.
+    use crate::parser::types::SessionSummary;
+    use crate::cost::CostBreakdown;
+
+    let mut best: Option<(SessionSummary, CostBreakdown, f64)> = None;
+    let slug_lower = slug.to_lowercase();
+
     for sf in session_files {
         let project_path = decode_project_path(&sf.project_dir_name);
         let entries = reader::parse_session_file(&sf.path, args.verbose)?;
         let summary = reader::summarize_session(&entries, sf.session_id.clone(), project_path);
 
-        if summary.slug.as_deref() == Some(slug) {
+        let matches = match summary.slug.as_deref() {
+            Some(s) => {
+                let s_lower = s.to_lowercase();
+                s_lower == slug_lower || s_lower.contains(&slug_lower)
+            }
+            None => false,
+        };
+
+        if !matches {
+            continue;
+        }
+
+        let is_newer = match (&best, summary.start_time) {
+            (None, _) => true,
+            (Some((prev, _, _)), Some(new_start)) => match prev.start_time {
+                Some(prev_start) => new_start > prev_start,
+                None => true,
+            },
+            _ => false,
+        };
+
+        if is_newer {
             let pricing = lookup_pricing(config, summary.model.as_deref());
             let cost = calculate_usage_cost(&summary.total_usage, &pricing);
             let hit = cache_hit_ratio(&summary.total_usage);
+            best = Some((summary, cost, hit));
+        }
+    }
 
+    match best {
+        Some((summary, cost, hit)) => {
             if args.json {
                 output::json::print_session_json(&summary, &cost, hit, args.show_cost);
             } else {
                 output::table::render_session_detail(&summary, &cost, hit, args.show_cost);
             }
-            return Ok(());
+            Ok(())
         }
+        None => anyhow::bail!("No session found matching '{}'", slug),
     }
-
-    anyhow::bail!("No session found matching '{}'", slug);
 }
 
 fn lookup_pricing(config: &Config, model: Option<&str>) -> crate::config::ModelPricing {

@@ -373,7 +373,11 @@ pub fn shorten_project(path: &str) -> String {
 }
 
 /// Shorten a model name for table display.
+/// Filters out `<synthetic>` (used by Claude Code for internal entries).
 pub fn shorten_model(model: &str) -> &str {
+    if model == "<synthetic>" {
+        return "unknown";
+    }
     if model.len() > 20 {
         if let Some(pos) = model.rfind("-20") {
             return &model[..pos];

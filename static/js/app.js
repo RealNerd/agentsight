@@ -268,9 +268,15 @@ function renderSessionsTable(data, showCost) {
                 </tr>
             </thead>
             <tbody>
-                ${data.sessions.map(s => `
+                ${data.sessions.map(s => {
+                    const base = s.slug || s.session_id.slice(0, 8);
+                    const hasDupe = s.slug && data.sessions.some(
+                        o => o.slug === s.slug && o.session_id !== s.session_id
+                    );
+                    const label = hasDupe ? base + ' (' + s.session_id.slice(0, 4) + ')' : base;
+                    return `
                     <tr class="clickable-row" onclick="window.location.hash='#/session/${s.session_id}'">
-                        <td>${s.slug || s.session_id.slice(0, 8)}</td>
+                        <td>${label}</td>
                         <td>${shortenProject(s.project)}</td>
                         <td>${formatDate(s.start_time)}</td>
                         <td>${shortenModel(s.model)}</td>
@@ -278,8 +284,8 @@ function renderSessionsTable(data, showCost) {
                         ${showCost ? `<td class="right mono">${s.cost ? formatCost(s.cost.total) : ''}</td>` : ''}
                         <td class="right mono">${formatPercent(s.cache_hit_ratio)}</td>
                         <td class="right mono">${s.turns}</td>
-                    </tr>
-                `).join('')}
+                    </tr>`;
+                }).join('')}
             </tbody>
         </table>
         <div style="color: var(--text-muted); font-size: 0.8rem;">
@@ -966,6 +972,14 @@ async function renderWatchPage() {
     };
 }
 
+function watchSessionLabel(s, allSessions) {
+    const base = s.slug || s.session_id.slice(0, 8);
+    const hasDupe = s.slug && allSessions.some(
+        other => other.slug === s.slug && other.session_id !== s.session_id
+    );
+    return hasDupe ? base + ' (' + s.session_id.slice(0, 4) + ')' : base;
+}
+
 function renderWatchTable(snapshot, showCost) {
     const container = document.getElementById('watch-table');
     if (!container) return;
@@ -975,12 +989,15 @@ function renderWatchTable(snapshot, showCost) {
         return;
     }
 
+    const sessions = snapshot.active_sessions;
+
     container.innerHTML = `
         <table class="data-table">
             <thead>
                 <tr>
                     <th>Session</th>
                     <th>Project</th>
+                    <th>Started</th>
                     <th>Model</th>
                     <th class="right">Tokens</th>
                     ${showCost ? '<th class="right">Cost</th>' : ''}
@@ -989,17 +1006,23 @@ function renderWatchTable(snapshot, showCost) {
                 </tr>
             </thead>
             <tbody>
-                ${snapshot.active_sessions.map(s => `
+                ${sessions.map(s => {
+                    const label = watchSessionLabel(s, sessions);
+                    const started = s.start_time
+                        ? new Date(s.start_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
+                        : '';
+                    return `
                     <tr class="clickable-row" onclick="window.location.hash='#/session/${s.session_id}'">
-                        <td>${s.slug || s.session_id.slice(0, 8)}</td>
+                        <td>${label}</td>
                         <td>${shortenProject(s.project)}</td>
+                        <td class="mono">${started}</td>
                         <td>${shortenModel(s.model)}</td>
                         <td class="right mono">${formatTokens(s.tokens.total)}</td>
                         ${showCost ? `<td class="right mono">${s.cost ? formatCost(s.cost.total) : ''}</td>` : ''}
                         <td class="right mono">${formatPercent(s.cache_hit_ratio)}</td>
                         <td class="right mono">${s.turns}</td>
-                    </tr>
-                `).join('')}
+                    </tr>`;
+                }).join('')}
             </tbody>
         </table>
         <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem;">

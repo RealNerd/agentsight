@@ -116,9 +116,10 @@ pub async fn get_session_by_slug(
 ) -> Result<Json<SessionDetailJson>, StatusCode> {
     state.cache.refresh().await;
 
+    // Try exact match first, then substring. When multiple match, pick most recent.
     let cs = state
         .cache
-        .get_by_slug(&slug)
+        .get_by_slug_best(&slug)
         .await
         .ok_or(StatusCode::NOT_FOUND)?;
 

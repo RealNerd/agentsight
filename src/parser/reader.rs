@@ -141,12 +141,20 @@ fn accumulate_assistant(
         }
     }
 
+    // Filter out "<synthetic>" model from per-turn data
+    let turn_model = assistant
+        .message
+        .model
+        .as_deref()
+        .filter(|m| *m != "<synthetic>")
+        .map(|m| m.to_string());
+
     summary.turns.push(TurnSummary {
         index: *turn_index,
         timestamp: assistant.common.timestamp,
         usage,
         tools,
-        model: assistant.message.model.clone(),
+        model: turn_model,
     });
 
     *turn_index += 1;
