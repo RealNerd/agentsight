@@ -33,6 +33,9 @@ pub async fn run_watcher(
     let mut tracked: HashMap<PathBuf, WatchedSession> = HashMap::new();
     let mut tick: u64 = 0;
     let mut interval = time::interval(Duration::from_secs(2));
+    // Track last broadcast total_tokens to skip duplicate snapshots
+    let mut last_broadcast_tokens: u64 = 0;
+    let mut last_broadcast_count: usize = 0;
 
     loop {
         interval.tick().await;
@@ -139,6 +142,14 @@ pub async fn run_watcher(
                         .total_tokens()
                 })
                 .sum();
+
+            // Skip broadcast if tokens and session count are unchanged
+            if total_tokens == last_broadcast_tokens && active.len() == last_broadcast_count {
+                tick += 1;
+                continue;
+            }
+            last_broadcast_tokens = total_tokens;
+            last_broadcast_count = active.len();
 
             let total_cost = if show_cost {
                 Some(

@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use std::convert::Infallible;
+use std::time::Duration;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
@@ -18,5 +19,9 @@ pub async fn watch_stream(
         Err(_) => None,
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(30))
+            .text("ping"),
+    )
 }

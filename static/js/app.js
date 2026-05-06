@@ -830,6 +830,7 @@ function formatTimeLabel(isoString, periodDays) {
 // ── Watch Page ────────────────────────────────────────
 let watchEventSource = null;
 let watchTickInterval = null;
+let watchPageVisible = true;
 
 function cleanupWatch() {
     if (watchEventSource) {
@@ -871,9 +872,13 @@ async function renderWatchPage() {
     let burnChart = null;
     const MAX_BURN_POINTS = 60;
     const TICK_INTERVAL_MS = 2000;
+    let lastRenderedSnapshotKey = '';
 
     // Push a data point every tick, whether or not an SSE event arrived
     function pushBurnPoint() {
+        // Skip chart updates when tab is hidden to avoid wasted CPU/memory
+        if (document.hidden) return;
+
         const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         burnLabels.push(now);
         burnDeltas.push(pendingDelta);
@@ -895,14 +900,14 @@ async function renderWatchPage() {
             }], {
                 formatValue: v => formatTokens(v) + ' tokens',
                 chartOptions: {
-                    animation: { duration: 300, easing: 'linear' },
+                    animation: false,
                 },
             });
         } else {
-            // Update in-place — no destroy/recreate, smooth transition
+            // Update in-place — no destroy/recreate
             burnChart.data.labels = burnLabels;
             burnChart.data.datasets[0].data = burnDeltas;
-            burnChart.update('none'); // 'none' skips animation for the data shift, keeps it snappy
+            burnChart.update('none');
         }
     }
 
@@ -914,20 +919,27 @@ async function renderWatchPage() {
         try {
             const snapshot = JSON.parse(event.data);
 
-            // Update status
-            document.getElementById('watch-dot').className = 'status-dot';
-            document.getElementById('watch-status-text').textContent =
-                `Connected — ${snapshot.active_sessions.length} active session(s)`;
-
-            // Update table
-            renderWatchTable(snapshot, config.show_cost);
-
-            // Accumulate delta for the next tick
+            // Always accumulate delta regardless of visibility
             const currentTotal = snapshot.total_tokens;
             if (lastTotalTokens !== null) {
                 pendingDelta += Math.max(0, currentTotal - lastTotalTokens);
             }
             lastTotalTokens = currentTotal;
+
+            // Skip DOM updates when tab is hidden
+            if (document.hidden) return;
+
+            // Update status
+            document.getElementById('watch-dot').className = 'status-dot';
+            document.getElementById('watch-status-text').textContent =
+                `Connected — ${snapshot.active_sessions.length} active session(s)`;
+
+            // Skip table re-render if data hasn't changed
+            const snapshotKey = snapshot.total_tokens + ':' + snapshot.active_sessions.length;
+            if (snapshotKey === lastRenderedSnapshotKey) return;
+            lastRenderedSnapshotKey = snapshotKey;
+
+            renderWatchTable(snapshot, config.show_cost);
         } catch (e) {
             // Ignore parse errors
         }
@@ -1016,4 +1028,23 @@ window.addEventListener('hashchange', () => {
         cleanupWatch();
     }
     destroyAllCharts();
+});
+
+// Pause/resume SSE when tab visibility changes to avoid background CPU/memory use
+document.addEventListener('visibilitychange', () => {
+    const hash = window.location.hash || '#/';
+    if (!hash.startsWith('#/watch')) return;
+
+    if (document.hidden) {
+        // Close SSE connection when tab is hidden to stop server-side work
+        if (watchEventSource) {
+            watchEventSource.close();
+            watchEventSource = null;
+        }
+    } else {
+        // Reconnect when tab becomes visible again
+        if (!watchEventSource) {
+            renderWatchPage();
+        }
+    }
 });
