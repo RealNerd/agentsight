@@ -294,3 +294,45 @@ pub struct ConfigJson {
     pub show_cost: bool,
     pub models: Vec<String>,
 }
+
+// ── Diagnose types ────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct DiagnoseJson {
+    pub session: SessionJson,
+    pub cache_stability: CacheStabilityJson,
+    pub context_growth: ContextGrowthJson,
+    pub tool_patterns: ToolPatternsJson,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct CacheStabilityJson {
+    pub classification: String,
+    pub turns_above_threshold: usize,
+    pub total_turns: usize,
+    pub avg_cache_creation_pct: f64,
+    pub per_turn_ratios: Vec<f64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ContextGrowthJson {
+    pub growth_factor: f64,
+    pub flagged: bool,
+    pub per_turn_input: Vec<u64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ToolPatternsJson {
+    pub bash_loops: Vec<BashLoopJson>,
+    pub read_edit_ratio: f64,
+    pub exploration_flagged: bool,
+    pub subagent_count: usize,
+    pub subagent_flagged: bool,
+}
+
+#[derive(Serialize, Clone)]
+pub struct BashLoopJson {
+    pub start_turn: usize,
+    pub length: usize,
+}

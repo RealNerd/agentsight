@@ -11,6 +11,8 @@ cargo run -- sessions        # List recent sessions
 cargo run -- session <slug>  # Drill into a session
 cargo run -- summary         # Cross-session aggregation
 cargo run -- watch           # Live-tail active session
+cargo run -- diagnose        # Session efficiency diagnosis
+cargo run -- install-skill   # Install CC slash commands
 cargo run -- --cost <cmd>    # Add cost estimates to any command
 cargo clippy                 # Lint
 cargo fmt                    # Format
@@ -22,6 +24,7 @@ cargo fmt                    # Format
 src/
 ├── main.rs              # CLI entry (clap derive)
 ├── commands/            # One file per subcommand
+├── skills/              # Built-in CC skill definitions (embedded via include_str!)
 ├── parser/              # JSONL types, reader, session discovery
 │   ├── types.rs         # Serde structs matching Claude Code JSONL schema
 │   ├── reader.rs        # Parse files, summarize sessions

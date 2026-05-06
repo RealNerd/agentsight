@@ -4,6 +4,7 @@ mod cost;
 mod output;
 mod parser;
 mod server;
+mod skills;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -108,6 +109,20 @@ enum Commands {
         project: Option<String>,
     },
 
+    /// Diagnose session efficiency and suggest improvements
+    Diagnose {
+        /// Session slug or UUID prefix (default: most recent)
+        identifier: Option<String>,
+
+        /// Filter to a specific project (substring match)
+        #[arg(long)]
+        project: Option<String>,
+
+        /// How many days back to look
+        #[arg(long, default_value_t = 7)]
+        days: u64,
+    },
+
     /// Launch web dashboard
     Dashboard {
         /// Port to serve on
@@ -117,6 +132,20 @@ enum Commands {
         /// Don't open browser automatically
         #[arg(long)]
         no_open: bool,
+    },
+
+    /// Install AgentSight skills as Claude Code slash commands
+    InstallSkill {
+        /// Skill name to install (default: install all)
+        name: Option<String>,
+
+        /// List available skills
+        #[arg(long)]
+        list: bool,
+
+        /// Overwrite existing skill files
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -214,6 +243,22 @@ fn main() -> Result<()> {
                 verbose: cli.verbose,
             },
         ),
+        Commands::Diagnose {
+            identifier,
+            project,
+            days,
+        } => commands::diagnose::run(
+            &claude_dir,
+            &cfg,
+            &commands::diagnose::DiagnoseArgs {
+                identifier,
+                project,
+                days,
+                json: cli.json,
+                show_cost,
+                verbose: cli.verbose,
+            },
+        ),
         Commands::Dashboard { port, no_open } => commands::dashboard::run(
             &claude_dir,
             &cfg,
@@ -223,6 +268,15 @@ fn main() -> Result<()> {
                 show_cost,
             },
         ),
+        Commands::InstallSkill { name, list, force } => {
+            commands::install_skill::run(&commands::install_skill::InstallSkillArgs {
+                name,
+                list,
+                force,
+                json: cli.json,
+                verbose: cli.verbose,
+            })
+        }
     }
 }
 
