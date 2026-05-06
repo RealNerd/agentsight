@@ -3,6 +3,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 /// A single line from a Claude Code session JSONL file.
+/// Unknown entry types (e.g. "summary") are captured as `Other` and silently ignored.
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
@@ -19,6 +20,8 @@ pub enum SessionEntry {
     FileHistorySnapshot(FileHistorySnapshotEntry),
     #[serde(rename = "queue-operation")]
     QueueOperation(QueueOperationEntry),
+    #[serde(other)]
+    Unknown,
 }
 
 // ── Common fields ──────────────────────────────────────────────────
@@ -115,7 +118,7 @@ pub struct UserEntry {
     #[serde(flatten)]
     pub common: CommonFields,
     pub message: UserMessage,
-    pub tool_use_result: Option<ToolUseResult>,
+    pub tool_use_result: Option<serde_json::Value>,
 }
 
 #[allow(dead_code)]
@@ -125,15 +128,6 @@ pub struct UserMessage {
     pub content: Option<serde_json::Value>,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ToolUseResult {
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
-    pub interrupted: Option<bool>,
-    pub is_error: Option<bool>,
-}
 
 // ── Progress entries ───────────────────────────────────────────────
 

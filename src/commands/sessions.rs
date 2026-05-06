@@ -17,6 +17,7 @@ pub struct SessionsArgs {
     pub limit: usize,
     pub json: bool,
     pub show_cost: bool,
+    pub verbose: bool,
 }
 
 pub enum SortField {
@@ -43,7 +44,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SessionsArgs) -> Result<()
             }
         }
 
-        let entries = reader::parse_session_file(&sf.path)?;
+        let entries = reader::parse_session_file(&sf.path, args.verbose)?;
         let summary = reader::summarize_session(&entries, sf.session_id.clone(), project_path);
 
         if let Some(start) = summary.start_time {

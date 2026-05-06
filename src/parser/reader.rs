@@ -8,8 +8,8 @@ use super::types::{
 };
 
 /// Parse a session JSONL file into a sequence of typed entries.
-/// Skips malformed lines with a warning to stderr.
-pub fn parse_session_file(path: &Path) -> Result<Vec<SessionEntry>> {
+/// Skips malformed lines. Warnings are printed to stderr only if `verbose` is true.
+pub fn parse_session_file(path: &Path, verbose: bool) -> Result<Vec<SessionEntry>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
     let mut entries = Vec::new();
@@ -18,12 +18,14 @@ pub fn parse_session_file(path: &Path) -> Result<Vec<SessionEntry>> {
         let line = match line {
             Ok(l) => l,
             Err(e) => {
-                eprintln!(
-                    "warn: failed to read line {} in {}: {}",
-                    line_num + 1,
-                    path.display(),
-                    e
-                );
+                if verbose {
+                    eprintln!(
+                        "warn: failed to read line {} in {}: {}",
+                        line_num + 1,
+                        path.display(),
+                        e
+                    );
+                }
                 continue;
             }
         };
@@ -35,12 +37,14 @@ pub fn parse_session_file(path: &Path) -> Result<Vec<SessionEntry>> {
         match serde_json::from_str::<SessionEntry>(&line) {
             Ok(entry) => entries.push(entry),
             Err(e) => {
-                eprintln!(
-                    "warn: skipping malformed line {} in {}: {}",
-                    line_num + 1,
-                    path.display(),
-                    e
-                );
+                if verbose {
+                    eprintln!(
+                        "warn: skipping malformed line {} in {}: {}",
+                        line_num + 1,
+                        path.display(),
+                        e
+                    );
+                }
             }
         }
     }
@@ -73,7 +77,11 @@ pub fn summarize_session(
                     summary.git_branch = assistant.common.git_branch.clone();
                 }
                 if summary.model.is_none() {
-                    summary.model = assistant.message.model.clone();
+                    if let Some(ref m) = assistant.message.model {
+                        if m != "<synthetic>" {
+                            summary.model = Some(m.clone());
+                        }
+                    }
                 }
 
                 update_time_range(&mut summary, &assistant.common.timestamp);
@@ -87,7 +95,8 @@ pub fn summarize_session(
             }
             SessionEntry::Progress(_)
             | SessionEntry::FileHistorySnapshot(_)
-            | SessionEntry::QueueOperation(_) => {}
+            | SessionEntry::QueueOperation(_)
+            | SessionEntry::Unknown => {}
         }
     }
 

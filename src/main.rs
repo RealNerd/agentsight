@@ -31,6 +31,10 @@ struct Cli {
     #[arg(long, global = true, default_value_t = default_claude_dir_string())]
     claude_dir: String,
 
+    /// Show parse warnings for malformed JSONL lines
+    #[arg(long, short, global = true)]
+    verbose: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -77,15 +81,19 @@ enum Commands {
         project: Option<String>,
     },
 
-    /// Live-watch the most recently active session
+    /// Live-watch all active sessions
     Watch {
-        /// Watch a specific session instead of the most recent
+        /// Filter to sessions matching this prefix
         #[arg(long)]
         session: Option<String>,
 
         /// Exit after N seconds of inactivity
         #[arg(long, default_value_t = 300)]
         idle_timeout: u64,
+
+        /// Seconds of inactivity before a session is hidden
+        #[arg(long, default_value_t = 60)]
+        active_window: u64,
     },
 }
 
@@ -123,6 +131,7 @@ fn main() -> Result<()> {
                     limit,
                     json: cli.json,
                     show_cost,
+                    verbose: cli.verbose,
                 },
             )
         }
@@ -136,6 +145,7 @@ fn main() -> Result<()> {
                 identifier,
                 json: cli.json,
                 show_cost,
+                verbose: cli.verbose,
             },
         ),
         Commands::Summary { days, project } => commands::summary::run(
@@ -146,19 +156,23 @@ fn main() -> Result<()> {
                 project,
                 json: cli.json,
                 show_cost,
+                verbose: cli.verbose,
             },
         ),
         Commands::Watch {
             session,
             idle_timeout,
+            active_window,
         } => commands::watch::run(
             &claude_dir,
             &cfg,
             &commands::watch::WatchArgs {
                 session,
                 idle_timeout,
+                active_window,
                 json: cli.json,
                 show_cost,
+                verbose: cli.verbose,
             },
         ),
     }

@@ -12,6 +12,7 @@ pub struct SessionArgs {
     pub identifier: String,
     pub json: bool,
     pub show_cost: bool,
+    pub verbose: bool,
 }
 
 pub fn run(claude_dir: &Path, config: &Config, args: &SessionArgs) -> Result<()> {
@@ -31,7 +32,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SessionArgs) -> Result<()>
     };
 
     let project_path = decode_project_path(&sf.project_dir_name);
-    let entries = reader::parse_session_file(&sf.path)?;
+    let entries = reader::parse_session_file(&sf.path, args.verbose)?;
     let summary = reader::summarize_session(&entries, sf.session_id.clone(), project_path);
 
     let pricing = lookup_pricing(config, summary.model.as_deref());
@@ -55,7 +56,7 @@ fn find_by_slug(
 ) -> Result<()> {
     for sf in session_files {
         let project_path = decode_project_path(&sf.project_dir_name);
-        let entries = reader::parse_session_file(&sf.path)?;
+        let entries = reader::parse_session_file(&sf.path, args.verbose)?;
         let summary = reader::summarize_session(&entries, sf.session_id.clone(), project_path);
 
         if summary.slug.as_deref() == Some(slug) {

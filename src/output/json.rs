@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde::Serialize;
 
 use crate::cost::CostBreakdown;
@@ -101,6 +102,52 @@ pub fn print_session_json(
     println!(
         "{}",
         serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+// ── Watch snapshot types ──────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct WatchSnapshotJson {
+    pub timestamp: String,
+    pub active_sessions: Vec<SessionJson>,
+    pub total_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost: Option<f64>,
+}
+
+/// Print a watch snapshot as a single NDJSON line to stdout.
+pub fn print_watch_snapshot_json(
+    sessions: &[(SessionSummary, CostBreakdown, f64)],
+    show_cost: bool,
+) {
+    let active: Vec<SessionJson> = sessions
+        .iter()
+        .map(|(s, c, hit)| session_to_json(s, c, *hit, show_cost))
+        .collect();
+
+    let total_tokens: u64 = sessions
+        .iter()
+        .map(|(s, _, _)| s.total_usage.total_tokens())
+        .sum();
+
+    let total_cost = if show_cost {
+        Some(sessions.iter().map(|(_, c, _)| c.total()).sum())
+    } else {
+        None
+    };
+
+    let snapshot = WatchSnapshotJson {
+        timestamp: Utc::now().to_rfc3339(),
+        active_sessions: active,
+        total_tokens,
+        total_cost,
+    };
+
+    // NDJSON: one compact JSON object per line
+    println!(
+        "{}",
+        serde_json::to_string(&snapshot).unwrap_or_default()
     );
 }
 
