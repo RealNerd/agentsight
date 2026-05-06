@@ -53,6 +53,47 @@ Look at the tool breakdown for patterns:
 
 5. **"Is my CLAUDE.md helping or hurting?"** — Compare cache creation tokens across sessions in the same project. If sessions after you updated CLAUDE.md show higher cache creation, the new instructions might be too large or causing the agent to explore more.
 
-## What the Tool Doesn't Tell You Yet
+## The Bash Loop Problem
 
-The data can't yet answer "did this session produce good output?" — that's the context effectiveness scoring pillar from the roadmap. Right now you can see *where tokens went* but not *whether they were well spent*. That's the next layer.
+One of the most expensive anti-patterns is invisible to most developers: the agent gets stuck retrying a failing command. It runs `cargo test`, gets an error, tries again, gets the same error, tries a slight variation, same error — burning through tokens doing nothing useful. This shows up in session data as consecutive turns where the only tool call is Bash.
+
+**Detection:** 3+ consecutive Bash-only turns in the turn-by-turn data. Even without seeing the command text, this pattern almost always means the agent is stuck.
+
+**What to put in CLAUDE.md to prevent it:**
+- Known-good build, test, and lint commands with expected output
+- Common error messages and their fixes ("If cargo test fails with X, check Y")
+- A rule: "If a shell command fails twice with the same error, stop and ask the user rather than retrying"
+
+## CLAUDE.md Hygiene
+
+Most developers either write too much CLAUDE.md (bloating every turn's input) or write nothing (forcing the agent to explore every session). Both waste tokens.
+
+**Signs your CLAUDE.md is too large:**
+- High base input tokens even on turn 1 (before the agent has read any files)
+- Consistent cache creation on early turns across multiple sessions
+
+**Signs your CLAUDE.md is missing or insufficient:**
+- High Read/Glob tool calls in the first 5 turns of every session (agent exploring to understand the project)
+- Low cache hit ratio in early turns that improves later (agent building context from scratch each time)
+- Same files being Read in multiple sessions (the agent keeps rediscovering what it should already know)
+
+**What belongs in CLAUDE.md:**
+- Build/test/lint commands (the agent will try to figure these out via Bash if you don't tell it)
+- Key source file locations and their purpose (prevents exploration-heavy sessions)
+- Project-specific conventions the agent can't infer from code alone
+- Error recovery guidance for common failure modes
+
+**What doesn't belong in CLAUDE.md:**
+- Full API references (too large — put in a separate file and @-reference only when relevant)
+- Obvious things the agent can infer from the codebase
+- Instructions that change frequently (causes cache churn)
+
+## The Feedback Loop — Where AgentSight Is Headed
+
+The current tool answers "where did tokens go?" The next step is closing the loop:
+
+1. **`agentsight diagnose`** — Analyzes sessions and produces specific, actionable recommendations (not just metrics)
+2. **`/agentsight-diagnose` CC skill** — A Claude Code skill that runs diagnose, reads your CLAUDE.md, and tells you exactly what to change
+3. **`agentsight init`** — First-run baseline report that gives new users a narrative starting point
+
+The goal: install agentsight, run the skill, get personalized guidance on improving your CC workflow — without needing to understand token economics yourself. The dashboard and CLI remain available for power users who want the full picture.
