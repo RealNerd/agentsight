@@ -210,9 +210,18 @@ pub struct SummaryJson {
     pub total_cost: Option<f64>,
     pub avg_tokens_per_session: u64,
     pub cache_hit_ratio: f64,
+    pub active_hours: u64,
+    pub avg_tokens_per_hour: u64,
+    pub peak_hour: Option<HourBurnJson>,
     pub by_project: Vec<ProjectBreakdownJson>,
     pub by_model: Vec<ModelBreakdownJson>,
     pub by_day: Vec<DayBreakdownJson>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct HourBurnJson {
+    pub hour: String,
+    pub tokens: u64,
 }
 
 #[derive(Serialize, Clone)]

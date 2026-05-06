@@ -108,6 +108,7 @@ html, body {
 }
 
 .kpi-value.accent { color: var(--accent); }
+.kpi-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
 .kpi-value.green { color: var(--green); }
 
 /* ── Charts ──────────────────────────────────────── */

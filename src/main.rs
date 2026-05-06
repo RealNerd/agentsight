@@ -123,6 +123,11 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // Create default config on first run (before loading)
+    if cli.config.is_none() {
+        config::ensure_config_exists();
+    }
+
     let claude_dir = PathBuf::from(&cli.claude_dir);
     let cfg = config::Config::load(cli.config.as_deref())?;
 

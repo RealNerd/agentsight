@@ -96,6 +96,42 @@ fn default_config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".agentsight").join("config.toml"))
 }
 
+/// Template for the first-run config file.
+const DEFAULT_CONFIG_TEMPLATE: &str = r#"# AgentSight configuration
+# https://github.com/RealNerd/agentsight
+#
+# This file was auto-generated on first run.
+# Uncomment and edit settings below to customize.
+
+# Billing mode: "max" (default) shows token usage only.
+# Set to "api" to show dollar cost estimates by default.
+# billing = "api"
+
+# Override model pricing (per million tokens, USD).
+# Built-in pricing is used for models not listed here.
+#
+# [models."claude-opus-4-6"]
+# input_per_million = 5.00
+# output_per_million = 25.00
+# cache_creation_per_million = 6.25
+# cache_read_per_million = 0.50
+"#;
+
+/// Create ~/.agentsight/config.toml with commented defaults if it doesn't exist.
+/// Called once at startup. Silently does nothing on any error.
+pub fn ensure_config_exists() {
+    let Some(path) = default_config_path() else {
+        return;
+    };
+    if path.exists() {
+        return;
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, DEFAULT_CONFIG_TEMPLATE);
+}
+
 /// Default path for Claude Code data: ~/.claude
 pub fn default_claude_dir() -> PathBuf {
     dirs::home_dir()

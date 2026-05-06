@@ -199,6 +199,7 @@ pub async fn get_summary(
     let mut total_cache_reads: u64 = 0;
     let mut total_input_tokens: u64 = 0;
     let mut by_day: HashMap<String, (u64, f64, u64)> = HashMap::new(); // (tokens, cost, sessions)
+    let mut by_hour: HashMap<String, u64> = HashMap::new();
 
     for cs in &matching {
         let s = &cs.summary;
@@ -225,6 +226,14 @@ pub async fn get_summary(
             entry.0 += tok;
             entry.1 += cost_total;
             entry.2 += 1;
+        }
+
+        // Bucket turns by hour for burn rate
+        for turn in &s.turns {
+            if let Some(ts) = turn.timestamp {
+                let hour_key = ts.format("%Y-%m-%d %H").to_string();
+                *by_hour.entry(hour_key).or_default() += turn.usage.total_tokens();
+            }
         }
 
         total_tokens += tok;
@@ -298,6 +307,16 @@ pub async fn get_summary(
         .collect();
     by_day_json.sort_by_key(|d| d.date.clone());
 
+    let active_hours = by_hour.len() as u64;
+    let avg_tokens_per_hour = total_tokens.checked_div(active_hours.max(1)).unwrap_or(0);
+    let peak_hour = by_hour
+        .iter()
+        .max_by_key(|(_, v)| *v)
+        .map(|(h, t)| crate::output::json::HourBurnJson {
+            hour: h.clone(),
+            tokens: *t,
+        });
+
     Ok(Json(SummaryJson {
         period_days: days,
         session_count,
@@ -309,6 +328,9 @@ pub async fn get_summary(
         },
         avg_tokens_per_session: avg_tokens,
         cache_hit_ratio,
+        active_hours,
+        avg_tokens_per_hour,
+        peak_hour,
         by_project,
         by_model,
         by_day: by_day_json,

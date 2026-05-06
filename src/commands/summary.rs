@@ -34,6 +34,10 @@ pub struct SummaryData {
     pub total_input_tokens: u64,
     /// Sessions bucketed by date (YYYY-MM-DD) for daily trends.
     pub by_day: HashMap<String, DayBucket>,
+    /// Tokens bucketed by hour (YYYY-MM-DD HH) for burn rate analysis.
+    pub by_hour: HashMap<String, u64>,
+    /// Total active hours (hours with any token activity).
+    pub active_hours: u64,
 }
 
 #[derive(Default)]
@@ -67,6 +71,8 @@ pub fn compute_summary(
         total_cache_reads: 0,
         total_input_tokens: 0,
         by_day: HashMap::new(),
+        by_hour: HashMap::new(),
+        active_hours: 0,
     };
 
     for sf in &session_files {
@@ -91,6 +97,8 @@ pub fn compute_summary(
 
         accumulate_session(&mut data, &summary, config);
     }
+
+    data.active_hours = data.by_hour.len() as u64;
 
     Ok(data)
 }
@@ -149,6 +157,14 @@ fn accumulate_session(data: &mut SummaryData, summary: &SessionSummary, config: 
         bucket.sessions += 1;
     }
 
+    // Bucket turns by hour for burn rate
+    for turn in &summary.turns {
+        if let Some(ts) = turn.timestamp {
+            let hour_key = ts.format("%Y-%m-%d %H").to_string();
+            *data.by_hour.entry(hour_key).or_default() += turn.usage.total_tokens();
+        }
+    }
+
     data.total_tokens += session_tokens;
     data.total_cost += cost;
     data.session_count += 1;
@@ -164,12 +180,23 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
     )?;
 
     if args.json {
-        println!(
-            "{{\"sessions\": {}, \"total_tokens\": {}, \"total_cost\": {:.2}}}",
-            data.session_count,
-            data.total_tokens,
-            data.total_cost.total()
-        );
+        let peak_hour = data
+            .by_hour
+            .iter()
+            .max_by_key(|(_, v)| *v)
+            .map(|(h, t)| {
+                serde_json::json!({ "hour": h, "tokens": t })
+            });
+
+        let json = serde_json::json!({
+            "sessions": data.session_count,
+            "total_tokens": data.total_tokens,
+            "total_cost": data.total_cost.total(),
+            "active_hours": data.active_hours,
+            "avg_tokens_per_hour": data.total_tokens / data.active_hours.max(1),
+            "peak_hour": peak_hour,
+        });
+        println!("{}", serde_json::to_string_pretty(&json).unwrap_or_default());
         return Ok(());
     }
 
@@ -282,6 +309,33 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
         );
     }
     println!();
+
+    // Burn rate
+    if !data.by_hour.is_empty() {
+        println!(" ── Burn Rate ─────────────────────────────────────");
+        let active_hours = data.active_hours.max(1);
+        let avg_per_hour = data.total_tokens / active_hours;
+        let peak_hour = data.by_hour.iter().max_by_key(|(_, v)| *v);
+        println!("  Active hours:         {}", active_hours);
+        println!("  Avg tokens/hour:      {}", format_tokens(avg_per_hour));
+        if let Some((hour, tokens)) = peak_hour {
+            // Extract just the HH part for display
+            let hour_label = hour.split(' ').next_back().unwrap_or(hour);
+            println!(
+                "  Peak hour:            {} ({}:00)",
+                format_tokens(*tokens),
+                hour_label
+            );
+        }
+        if args.show_cost {
+            let avg_cost_per_hour = data.total_cost.total() / active_hours as f64;
+            println!(
+                "  Avg cost/hour:        {}",
+                format_cost(avg_cost_per_hour)
+            );
+        }
+        println!();
+    }
 
     Ok(())
 }

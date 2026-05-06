@@ -543,6 +543,16 @@ function renderSummaryContent(data, showCost) {
                 <div class="kpi-label">Cache Hit Ratio</div>
                 <div class="kpi-value green">${formatPercent(data.cache_hit_ratio)}</div>
             </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Avg Tokens/Hour</div>
+                <div class="kpi-value">${formatTokens(data.avg_tokens_per_hour)}</div>
+            </div>
+            ${data.peak_hour ? `
+            <div class="kpi-card">
+                <div class="kpi-label">Peak Hour</div>
+                <div class="kpi-value yellow">${formatTokens(data.peak_hour.tokens)}</div>
+                <div class="kpi-sub">${data.peak_hour.hour}</div>
+            </div>` : ''}
             ${showCost && data.total_cost != null ? `
             <div class="kpi-card">
                 <div class="kpi-label">Total Cost</div>
