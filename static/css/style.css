@@ -149,6 +149,15 @@ html, body {
     margin-bottom: 1.5rem;
 }
 
+.sortable-th {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+.sortable-th:hover {
+    color: var(--accent);
+}
+
 .data-table th {
     text-align: left;
     padding: 0.6rem 0.75rem;

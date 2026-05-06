@@ -213,13 +213,6 @@ async function renderSessionsList() {
                     <option value="">All</option>
                     ${projects.map(p => `<option value="${p}">${p}</option>`).join('')}
                 </select>
-                <label>Sort</label>
-                <select id="filter-sort">
-                    <option value="date">Date</option>
-                    <option value="tokens">Tokens</option>
-                    <option value="turns">Turns</option>
-                    <option value="cost">Cost</option>
-                </select>
             </div>
             <div id="sessions-table"><div class="loading">Loading...</div></div>
         `;
@@ -227,15 +220,13 @@ async function renderSessionsList() {
         async function loadSessions() {
             const days = document.getElementById('filter-days').value;
             const project = document.getElementById('filter-project').value;
-            const sort = document.getElementById('filter-sort').value;
 
-            const data = await api.sessions({ days, project, sort, limit: 100 });
+            const data = await api.sessions({ days, project, limit: 100 });
             renderSessionsTable(data, config.show_cost);
         }
 
         document.getElementById('filter-days').addEventListener('change', loadSessions);
         document.getElementById('filter-project').addEventListener('change', loadSessions);
-        document.getElementById('filter-sort').addEventListener('change', loadSessions);
 
         await loadSessions();
 
@@ -253,46 +244,42 @@ function renderSessionsTable(data, showCost) {
         return;
     }
 
-    container.innerHTML = `
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Session</th>
-                    <th>Project</th>
-                    <th>Date</th>
-                    <th>Model</th>
-                    <th class="right">Tokens</th>
-                    ${showCost ? '<th class="right">Cost</th>' : ''}
-                    <th class="right">Cache</th>
-                    <th class="right">Turns</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${data.sessions.map(s => {
-                    const base = s.slug || s.session_id.slice(0, 8);
-                    const hasDupe = s.slug && data.sessions.some(
-                        o => o.slug === s.slug && o.session_id !== s.session_id
-                    );
-                    const label = hasDupe ? base + ' (' + s.session_id.slice(0, 4) + ')' : base;
-                    return `
-                    <tr class="clickable-row" onclick="window.location.hash='#/session/${s.session_id}'">
-                        <td>${label}</td>
-                        <td>${shortenProject(s.project)}</td>
-                        <td>${formatDate(s.start_time)}</td>
-                        <td>${shortenModel(s.model)}</td>
-                        <td class="right mono">${formatTokens(s.tokens.total)}</td>
-                        ${showCost ? `<td class="right mono">${s.cost ? formatCost(s.cost.total) : ''}</td>` : ''}
-                        <td class="right mono">${formatPercent(s.cache_hit_ratio)}</td>
-                        <td class="right mono">${s.turns}</td>
-                    </tr>`;
-                }).join('')}
-            </tbody>
-        </table>
-        <div style="color: var(--text-muted); font-size: 0.8rem;">
-            ${data.session_count} sessions, ${formatTokens(data.total_tokens)} total tokens
-            ${data.total_cost != null ? ', ' + formatCost(data.total_cost) + ' total cost' : ''}
-        </div>
-    `;
+    // Pre-compute display labels for slug disambiguation
+    const sessions = data.sessions.map(s => {
+        const base = s.slug || s.session_id.slice(0, 8);
+        const hasDupe = s.slug && data.sessions.some(
+            o => o.slug === s.slug && o.session_id !== s.session_id
+        );
+        return { ...s, _label: hasDupe ? base + ' (' + s.session_id.slice(0, 4) + ')' : base };
+    });
+
+    const columns = [
+        { key: 'session', label: 'Session', sortValue: r => (r._label || '').toLowerCase(), format: r => r._label },
+        { key: 'project', label: 'Project', sortValue: r => shortenProject(r.project).toLowerCase(), format: r => shortenProject(r.project) },
+        { key: 'date', label: 'Date', sortValue: r => r.start_time || '', format: r => formatDate(r.start_time) },
+        { key: 'model', label: 'Model', sortValue: r => (r.model || '').toLowerCase(), format: r => shortenModel(r.model) },
+        { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens.total, format: r => formatTokens(r.tokens.total) },
+    ];
+    if (showCost) {
+        columns.push({ key: 'cost', label: 'Cost', align: 'right', sortValue: r => r.cost ? r.cost.total : 0, format: r => r.cost ? formatCost(r.cost.total) : '' });
+    }
+    columns.push(
+        { key: 'cache', label: 'Cache', align: 'right', sortValue: r => r.cache_hit_ratio, format: r => formatPercent(r.cache_hit_ratio) },
+        { key: 'turns', label: 'Turns', align: 'right', sortValue: r => r.turns, format: r => r.turns },
+    );
+
+    const footer = `${data.session_count} sessions, ${formatTokens(data.total_tokens)} total tokens`
+        + (data.total_cost != null ? ', ' + formatCost(data.total_cost) + ' total cost' : '');
+
+    sortableTable({
+        container,
+        columns,
+        rows: sessions,
+        defaultSort: 'date',
+        defaultDesc: true,
+        onRowClick: r => { window.location.hash = '#/session/' + r.session_id; },
+        footer,
+    });
 }
 
 // ── Session Detail Page ───────────────────────────────
@@ -395,32 +382,7 @@ async function renderSessionDetail(id) {
 
             ${s.turn_details && s.turn_details.length > 0 ? `
             <h3 class="page-title">Turn Details</h3>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th>Time</th>
-                        <th class="right">Input</th>
-                        <th class="right">Cache Read</th>
-                        <th class="right">Output</th>
-                        <th class="right">Total</th>
-                        <th>Tools</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${s.turn_details.map(t => `
-                        <tr>
-                            <td class="mono">${t.index}</td>
-                            <td>${t.timestamp ? new Date(t.timestamp).toLocaleTimeString() : ''}</td>
-                            <td class="right mono">${formatTokens(t.tokens.input)}</td>
-                            <td class="right mono">${formatTokens(t.tokens.cache_read)}</td>
-                            <td class="right mono">${formatTokens(t.tokens.output)}</td>
-                            <td class="right mono">${formatTokens(t.tokens.total)}</td>
-                            <td>${t.tools.join(', ') || '—'}</td>
-                        </tr>
-                    `).join('')}
-                </tbody>
-            </table>
+            <div id="turn-details-table"></div>
             ` : ''}
         `;
 
@@ -452,6 +414,26 @@ async function renderSessionDetail(id) {
                 { label: 'Cache Read', data: cacheData, borderColor: COLORS.green, backgroundColor: COLORS.green + '20' },
                 { label: 'Output', data: outputData, borderColor: COLORS.purple, backgroundColor: COLORS.purple + '20' },
             ]);
+        }
+
+        // Turn details sortable table
+        const turnContainer = document.getElementById('turn-details-table');
+        if (turnContainer && s.turn_details && s.turn_details.length > 0) {
+            sortableTable({
+                container: turnContainer,
+                columns: [
+                    { key: 'index', label: '#', sortValue: r => r.index, format: r => r.index },
+                    { key: 'time', label: 'Time', sortValue: r => r.timestamp || '', format: r => r.timestamp ? new Date(r.timestamp).toLocaleTimeString() : '' },
+                    { key: 'input', label: 'Input', align: 'right', sortValue: r => r.tokens.input, format: r => formatTokens(r.tokens.input) },
+                    { key: 'cache_read', label: 'Cache Read', align: 'right', sortValue: r => r.tokens.cache_read, format: r => formatTokens(r.tokens.cache_read) },
+                    { key: 'output', label: 'Output', align: 'right', sortValue: r => r.tokens.output, format: r => formatTokens(r.tokens.output) },
+                    { key: 'total', label: 'Total', align: 'right', sortValue: r => r.tokens.total, format: r => formatTokens(r.tokens.total) },
+                    { key: 'tools', label: 'Tools', sortValue: r => r.tools.join(', '), format: r => r.tools.join(', ') || '—' },
+                ],
+                rows: s.turn_details,
+                defaultSort: 'index',
+                defaultDesc: false,
+            });
         }
 
         // Tool usage bar chart
@@ -571,53 +553,8 @@ function renderSummaryContent(data, showCost) {
             </div>
         </div>
 
-        ${data.by_project.length > 0 ? `
-        <h3 class="page-title">By Project</h3>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Project</th>
-                    <th class="right">Tokens</th>
-                    <th class="right">Sessions</th>
-                    <th class="right">%</th>
-                    ${showCost ? '<th class="right">Cost</th>' : ''}
-                </tr>
-            </thead>
-            <tbody>
-                ${data.by_project.map(p => `
-                    <tr>
-                        <td>${p.project}</td>
-                        <td class="right mono">${formatTokens(p.tokens)}</td>
-                        <td class="right mono">${p.sessions}</td>
-                        <td class="right mono">${p.pct.toFixed(1)}%</td>
-                        ${showCost ? `<td class="right mono">${p.cost != null ? formatCost(p.cost) : ''}</td>` : ''}
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>` : ''}
-
-        ${data.by_model.length > 0 ? `
-        <h3 class="page-title">By Model</h3>
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Model</th>
-                    <th class="right">Tokens</th>
-                    <th class="right">%</th>
-                    ${showCost ? '<th class="right">Cost</th>' : ''}
-                </tr>
-            </thead>
-            <tbody>
-                ${data.by_model.map(m => `
-                    <tr>
-                        <td>${m.model}</td>
-                        <td class="right mono">${formatTokens(m.tokens)}</td>
-                        <td class="right mono">${m.pct.toFixed(1)}%</td>
-                        ${showCost ? `<td class="right mono">${m.cost != null ? formatCost(m.cost) : ''}</td>` : ''}
-                    </tr>
-                `).join('')}
-            </tbody>
-        </table>` : ''}
+        ${data.by_project.length > 0 ? '<h3 class="page-title">By Project</h3><div id="summary-by-project"></div>' : ''}
+        ${data.by_model.length > 0 ? '<h3 class="page-title">By Model</h3><div id="summary-by-model"></div>' : ''}
     `;
 
     // Daily trend chart
@@ -640,6 +577,35 @@ function renderSummaryContent(data, showCost) {
             data.by_project.map(p => p.project),
             data.by_project.map(p => p.tokens)
         );
+    }
+
+    // By Project sortable table
+    const projContainer = document.getElementById('summary-by-project');
+    if (projContainer && data.by_project.length > 0) {
+        const projCols = [
+            { key: 'project', label: 'Project', sortValue: r => r.project.toLowerCase(), format: r => r.project },
+            { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens, format: r => formatTokens(r.tokens) },
+            { key: 'sessions', label: 'Sessions', align: 'right', sortValue: r => r.sessions, format: r => r.sessions },
+            { key: 'pct', label: '%', align: 'right', sortValue: r => r.pct, format: r => r.pct.toFixed(1) + '%' },
+        ];
+        if (showCost) {
+            projCols.push({ key: 'cost', label: 'Cost', align: 'right', sortValue: r => r.cost || 0, format: r => r.cost != null ? formatCost(r.cost) : '' });
+        }
+        sortableTable({ container: projContainer, columns: projCols, rows: data.by_project, defaultSort: 'tokens', defaultDesc: true });
+    }
+
+    // By Model sortable table
+    const modelContainer = document.getElementById('summary-by-model');
+    if (modelContainer && data.by_model.length > 0) {
+        const modelCols = [
+            { key: 'model', label: 'Model', sortValue: r => r.model.toLowerCase(), format: r => r.model },
+            { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens, format: r => formatTokens(r.tokens) },
+            { key: 'pct', label: '%', align: 'right', sortValue: r => r.pct, format: r => r.pct.toFixed(1) + '%' },
+        ];
+        if (showCost) {
+            modelCols.push({ key: 'cost', label: 'Cost', align: 'right', sortValue: r => r.cost || 0, format: r => r.cost != null ? formatCost(r.cost) : '' });
+        }
+        sortableTable({ container: modelContainer, columns: modelCols, rows: data.by_model, defaultSort: 'tokens', defaultDesc: true });
     }
 }
 
