@@ -97,6 +97,17 @@ enum Commands {
         active_window: u64,
     },
 
+    /// Show session timeline with concurrency analysis
+    Timeline {
+        /// How many days back to look
+        #[arg(long, default_value_t = 1)]
+        days: u64,
+
+        /// Filter to a specific project (substring match)
+        #[arg(long)]
+        project: Option<String>,
+    },
+
     /// Launch web dashboard
     Dashboard {
         /// Port to serve on
@@ -182,6 +193,17 @@ fn main() -> Result<()> {
                 session,
                 idle_timeout,
                 active_window,
+                json: cli.json,
+                show_cost,
+                verbose: cli.verbose,
+            },
+        ),
+        Commands::Timeline { days, project } => commands::timeline::run(
+            &claude_dir,
+            &cfg,
+            &commands::timeline::TimelineArgs {
+                days,
+                project,
                 json: cli.json,
                 show_cost,
                 verbose: cli.verbose,

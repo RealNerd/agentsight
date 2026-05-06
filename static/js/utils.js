@@ -61,6 +61,7 @@ const api = {
     sessions(params) { return this.get('/sessions', params); },
     session(id) { return this.get('/sessions/' + id); },
     summary(params) { return this.get('/summary', params); },
+    timeline(params) { return this.get('/timeline', params); },
     config() { return this.get('/config'); },
     projects() { return this.get('/projects'); },
 };

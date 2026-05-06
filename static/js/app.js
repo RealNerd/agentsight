@@ -27,6 +27,8 @@ function route() {
         renderSessionDetail(id);
     } else if (path === '/summary') {
         renderSummaryPage();
+    } else if (path === '/timeline') {
+        renderTimelinePage();
     } else if (path === '/watch') {
         renderWatchPage();
     } else {
@@ -623,6 +625,224 @@ function renderSummaryContent(data, showCost) {
             data.by_project.map(p => p.tokens)
         );
     }
+}
+
+// ── Timeline Page ─────────────────────────────────────
+async function renderTimelinePage() {
+    const app = document.getElementById('app');
+    app.innerHTML = '<div class="loading">Loading timeline...</div>';
+    destroyAllCharts();
+
+    try {
+        const [projects, config] = await Promise.all([
+            api.projects(),
+            loadConfig(),
+        ]);
+
+        app.innerHTML = `
+            <h1 class="page-title">Timeline</h1>
+            <div class="filter-bar">
+                <label>Days</label>
+                <select id="tl-days">
+                    <option value="1" selected>1</option>
+                    <option value="3">3</option>
+                    <option value="7">7</option>
+                    <option value="14">14</option>
+                    <option value="30">30</option>
+                </select>
+                <label>Project</label>
+                <select id="tl-project">
+                    <option value="">All</option>
+                    ${projects.map(p => `<option value="${p}">${p}</option>`).join('')}
+                </select>
+                <span id="tl-peak" style="margin-left: auto; color: var(--text-muted); font-size: 0.85rem;"></span>
+            </div>
+            <div id="tl-content"><div class="loading">Loading...</div></div>
+        `;
+
+        async function loadTimeline() {
+            const days = document.getElementById('tl-days').value;
+            const project = document.getElementById('tl-project').value;
+            const data = await api.timeline({ days, project });
+            renderTimelineContent(data, config.show_cost);
+        }
+
+        document.getElementById('tl-days').addEventListener('change', loadTimeline);
+        document.getElementById('tl-project').addEventListener('change', loadTimeline);
+
+        await loadTimeline();
+
+    } catch (err) {
+        app.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+    }
+}
+
+function renderTimelineContent(data, showCost) {
+    const container = document.getElementById('tl-content');
+    if (!container) return;
+    destroyAllCharts();
+
+    // Update peak indicator
+    const peakEl = document.getElementById('tl-peak');
+    if (peakEl) {
+        peakEl.textContent = data.total_sessions > 0
+            ? `Peak: ${data.peak_concurrent} concurrent | ${data.total_sessions} sessions`
+            : '';
+    }
+
+    if (data.total_sessions === 0) {
+        container.innerHTML = '<div class="empty-state">No sessions with time data found for this period.</div>';
+        return;
+    }
+
+    // Build project color map
+    const projectSet = [...new Set(data.sessions.map(s => s.project))];
+    const projectColors = {};
+    projectSet.forEach((p, i) => {
+        projectColors[p] = PALETTE[i % PALETTE.length];
+    });
+
+    container.innerHTML = `
+        <div class="chart-grid">
+            <div class="chart-card" style="grid-column: 1 / -1;">
+                <div class="chart-title">Concurrency Over Time</div>
+                <div class="chart-container"><canvas id="tl-concurrency"></canvas></div>
+            </div>
+        </div>
+
+        <div class="chart-card" style="margin-bottom: 1.5rem;">
+            <div class="chart-title">Session Gantt</div>
+            <div id="tl-gantt" class="gantt-container"></div>
+        </div>
+
+        <div class="chart-grid">
+            <div class="chart-card" style="grid-column: 1 / -1;">
+                <div class="chart-title">Token Burn Rate</div>
+                <div class="chart-container"><canvas id="tl-burn"></canvas></div>
+            </div>
+        </div>
+
+        <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem;">
+            ${data.total_sessions} sessions across ${data.period_days} day(s)
+        </div>
+    `;
+
+    // 1. Concurrency area chart
+    if (data.concurrency.length > 0) {
+        const labels = data.concurrency.map(c => formatTimeLabel(c.time, data.period_days));
+        createLineChart('tl-concurrency', labels, [{
+            label: 'Concurrent Sessions',
+            data: data.concurrency.map(c => c.count),
+            borderColor: COLORS.primary,
+            backgroundColor: COLORS.primary + '30',
+            fill: true,
+        }], {
+            formatValue: v => v + ' sessions',
+            yTickFormat: v => v,
+            chartOptions: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            stepSize: 1,
+                            callback: v => Number.isInteger(v) ? v : '',
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // 2. Gantt chart (HTML/CSS positioned divs)
+    renderGanttChart(data, projectColors, showCost);
+
+    // 3. Token burn rate bar chart (stacked by project)
+    if (data.concurrency.length > 0) {
+        const labels = data.concurrency.map(c => formatTimeLabel(c.time, data.period_days));
+
+        // For a simple non-stacked view, just use total tokens per slot
+        createBarChart('tl-burn', labels, [{
+            label: 'Tokens',
+            data: data.concurrency.map(c => c.tokens),
+            backgroundColor: COLORS.primary + '99',
+            borderColor: COLORS.primary,
+            borderWidth: 1,
+        }]);
+    }
+}
+
+function renderGanttChart(data, projectColors, showCost) {
+    const ganttEl = document.getElementById('tl-gantt');
+    if (!ganttEl || data.sessions.length === 0) return;
+
+    const periodStart = new Date(data.period_start).getTime();
+    const periodEnd = new Date(data.period_end).getTime();
+    const totalMs = periodEnd - periodStart;
+    if (totalMs <= 0) return;
+
+    // Group by project
+    const projectOrder = [];
+    const byProject = {};
+    data.sessions.forEach(s => {
+        if (!byProject[s.project]) {
+            byProject[s.project] = [];
+            projectOrder.push(s.project);
+        }
+        byProject[s.project].push(s);
+    });
+
+    let html = '';
+
+    // Time axis ticks
+    const numTicks = Math.min(data.concurrency.length, 12);
+    const tickStep = Math.max(1, Math.floor(data.concurrency.length / numTicks));
+    html += '<div class="gantt-axis">';
+    for (let i = 0; i < data.concurrency.length; i += tickStep) {
+        const c = data.concurrency[i];
+        const t = new Date(c.time).getTime();
+        const pct = ((t - periodStart) / totalMs * 100);
+        html += `<span class="gantt-tick" style="left:${pct}%">${formatTimeLabel(c.time, data.period_days)}</span>`;
+    }
+    html += '</div>';
+
+    // Session bars
+    for (const project of projectOrder) {
+        html += `<div class="gantt-project-label">${project}</div>`;
+
+        for (const s of byProject[project]) {
+            const startMs = new Date(s.start_time).getTime();
+            const endMs = new Date(s.end_time).getTime();
+            const left = ((startMs - periodStart) / totalMs * 100);
+            const width = Math.max(0.5, (endMs - startMs) / totalMs * 100);
+            const color = projectColors[s.project] || COLORS.primary;
+
+            const label = s.slug || s.session_id.slice(0, 8);
+            const durationStr = s.duration_minutes + 'm';
+            const tokenStr = formatTokens(s.tokens);
+            const cacheStr = formatPercent(s.cache_hit_ratio);
+            const costStr = showCost && s.cost != null ? ' | ' + formatCost(s.cost) : '';
+            const tooltip = `${label} — ${tokenStr} tokens, ${durationStr}, cache ${cacheStr}${costStr}`;
+
+            html += `<div class="gantt-row">
+                <div class="gantt-bar" style="left:${left}%;width:${width}%;background:${color}"
+                     title="${tooltip}"
+                     onclick="window.location.hash='#/session/${s.session_id}'">
+                    ${width > 8 ? `<span class="gantt-bar-label">${label}</span>` : ''}
+                </div>
+            </div>`;
+        }
+    }
+
+    ganttEl.innerHTML = html;
+}
+
+function formatTimeLabel(isoString, periodDays) {
+    const d = new Date(isoString);
+    if (periodDays <= 3) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+           ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 // ── Watch Page ────────────────────────────────────────

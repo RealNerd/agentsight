@@ -4,9 +4,12 @@ use axum::Json;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::commands::timeline::{compute_concurrency, TimelineSession};
+use crate::cost::calculator::cache_hit_ratio;
 use crate::output::json::{
-    session_to_json, ConfigJson, DayBreakdownJson, ModelBreakdownJson, ProjectBreakdownJson,
-    SessionDetailJson, SessionJson, SessionListJson, SummaryJson, TokensJson, TurnDetailJson,
+    session_to_json, ConcurrencySlotJson, ConfigJson, DayBreakdownJson, ModelBreakdownJson,
+    ProjectBreakdownJson, SessionDetailJson, SessionJson, SessionListJson, SummaryJson,
+    TimelineJson, TimelineSessionJson, TokensJson, TurnDetailJson,
 };
 use crate::output::table::shorten_project;
 
@@ -326,6 +329,133 @@ pub async fn list_projects(
 ) -> Result<Json<Vec<String>>, StatusCode> {
     state.cache.refresh().await;
     Ok(Json(state.cache.get_projects().await))
+}
+
+#[derive(Deserialize)]
+pub struct TimelineQuery {
+    pub days: Option<u64>,
+    pub project: Option<String>,
+}
+
+pub async fn get_timeline(
+    State(state): State<AppState>,
+    Query(query): Query<TimelineQuery>,
+) -> Result<Json<TimelineJson>, StatusCode> {
+    state.cache.refresh().await;
+
+    let days = query.days.unwrap_or(1);
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+
+    let all = state.cache.get_all().await;
+
+    let mut sessions: Vec<TimelineSession> = Vec::new();
+
+    for cs in &all {
+        // Date filter
+        let (start, end) = match (cs.summary.start_time, cs.summary.end_time) {
+            (Some(s), Some(e)) if s >= cutoff => (s, e),
+            _ => continue,
+        };
+
+        // Project filter
+        if let Some(ref filter) = query.project {
+            if !cs.project_path.contains(filter.as_str()) {
+                continue;
+            }
+        }
+
+        let hit = cache_hit_ratio(&cs.summary.total_usage);
+
+        let turn_activity: Vec<(chrono::DateTime<chrono::Utc>, u64)> = cs
+            .summary
+            .turns
+            .iter()
+            .filter_map(|t| t.timestamp.map(|ts| (ts, t.usage.total_tokens())))
+            .collect();
+
+        sessions.push(TimelineSession {
+            session_id: cs.session_id.clone(),
+            slug: cs.summary.slug.clone(),
+            project: shorten_project(&cs.project_path),
+            model: cs.summary.model.clone(),
+            start,
+            end,
+            duration_minutes: (end - start).num_minutes(),
+            tokens: cs.summary.total_usage.total_tokens(),
+            turns: cs.summary.turns.len(),
+            cache_hit: hit,
+            cost: if state.show_cost {
+                Some(cs.cost.total())
+            } else {
+                None
+            },
+            turn_activity,
+        });
+    }
+
+    sessions.sort_by_key(|s| s.start);
+
+    if sessions.is_empty() {
+        let now = chrono::Utc::now();
+        return Ok(Json(TimelineJson {
+            period_start: now.to_rfc3339(),
+            period_end: now.to_rfc3339(),
+            period_days: days,
+            sessions: Vec::new(),
+            concurrency: Vec::new(),
+            peak_concurrent: 0,
+            total_sessions: 0,
+        }));
+    }
+
+    let axis_start = sessions.iter().map(|s| s.start).min().unwrap();
+    let axis_end = sessions.iter().map(|s| s.end).max().unwrap();
+
+    let granularity = match days {
+        0..=1 => chrono::Duration::minutes(30),
+        2..=3 => chrono::Duration::hours(1),
+        4..=14 => chrono::Duration::hours(4),
+        _ => chrono::Duration::days(1),
+    };
+
+    let concurrency = compute_concurrency(&sessions, axis_start, axis_end, granularity);
+    let peak = concurrency.iter().map(|s| s.count).max().unwrap_or(0);
+
+    let timeline_sessions: Vec<TimelineSessionJson> = sessions
+        .iter()
+        .map(|s| TimelineSessionJson {
+            session_id: s.session_id.clone(),
+            slug: s.slug.clone(),
+            project: s.project.clone(),
+            model: s.model.clone(),
+            start_time: s.start.to_rfc3339(),
+            end_time: s.end.to_rfc3339(),
+            duration_minutes: s.duration_minutes,
+            tokens: s.tokens,
+            turns: s.turns,
+            cache_hit_ratio: s.cache_hit,
+            cost: s.cost,
+        })
+        .collect();
+
+    let concurrency_json: Vec<ConcurrencySlotJson> = concurrency
+        .iter()
+        .map(|c| ConcurrencySlotJson {
+            time: c.time.to_rfc3339(),
+            count: c.count,
+            tokens: c.tokens,
+        })
+        .collect();
+
+    Ok(Json(TimelineJson {
+        period_start: axis_start.to_rfc3339(),
+        period_end: axis_end.to_rfc3339(),
+        period_days: days,
+        sessions: timeline_sessions,
+        concurrency: concurrency_json,
+        peak_concurrent: peak,
+        total_sessions: sessions.len(),
+    }))
 }
 
 pub async fn health() -> &'static str {

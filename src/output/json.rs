@@ -243,6 +243,42 @@ pub struct DayBreakdownJson {
     pub sessions: u64,
 }
 
+// ── Timeline types ────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct TimelineJson {
+    pub period_start: String,
+    pub period_end: String,
+    pub period_days: u64,
+    pub sessions: Vec<TimelineSessionJson>,
+    pub concurrency: Vec<ConcurrencySlotJson>,
+    pub peak_concurrent: u64,
+    pub total_sessions: usize,
+}
+
+#[derive(Serialize, Clone)]
+pub struct TimelineSessionJson {
+    pub session_id: String,
+    pub slug: Option<String>,
+    pub project: String,
+    pub model: Option<String>,
+    pub start_time: String,
+    pub end_time: String,
+    pub duration_minutes: i64,
+    pub tokens: u64,
+    pub turns: usize,
+    pub cache_hit_ratio: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ConcurrencySlotJson {
+    pub time: String,
+    pub count: u64,
+    pub tokens: u64,
+}
+
 #[derive(Serialize, Clone)]
 pub struct ConfigJson {
     pub billing_mode: String,
