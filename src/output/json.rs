@@ -5,7 +5,7 @@ use crate::cost::CostBreakdown;
 use crate::parser::types::SessionSummary;
 use std::collections::HashMap;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct SessionListJson {
     pub sessions: Vec<SessionJson>,
     pub total_tokens: u64,
@@ -14,7 +14,7 @@ pub struct SessionListJson {
     pub total_cost: Option<f64>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct SessionJson {
     pub session_id: String,
     pub slug: Option<String>,
@@ -30,7 +30,7 @@ pub struct SessionJson {
     pub cost: Option<CostJson>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct CostJson {
     pub input: f64,
     pub cache_creation: f64,
@@ -39,7 +39,7 @@ pub struct CostJson {
     pub total: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct TokensJson {
     pub input: u64,
     pub cache_creation: u64,
@@ -60,7 +60,7 @@ impl From<&CostBreakdown> for CostJson {
     }
 }
 
-fn session_to_json(
+pub fn session_to_json(
     summary: &SessionSummary,
     cost: &CostBreakdown,
     cache_hit: f64,
@@ -107,7 +107,7 @@ pub fn print_session_json(
 
 // ── Watch snapshot types ──────────────────────────────────────────
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct WatchSnapshotJson {
     pub timestamp: String,
     pub active_sessions: Vec<SessionJson>,
@@ -180,4 +180,72 @@ pub fn print_sessions_json(items: &[(SessionSummary, CostBreakdown, f64)], show_
         "{}",
         serde_json::to_string_pretty(&list).unwrap_or_default()
     );
+}
+
+// ── Dashboard API types ───────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct TurnDetailJson {
+    pub index: usize,
+    pub timestamp: Option<String>,
+    pub tokens: TokensJson,
+    pub tools: Vec<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SessionDetailJson {
+    #[serde(flatten)]
+    pub session: SessionJson,
+    pub git_branch: Option<String>,
+    pub turn_details: Vec<TurnDetailJson>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SummaryJson {
+    pub period_days: u64,
+    pub session_count: u64,
+    pub total_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_cost: Option<f64>,
+    pub avg_tokens_per_session: u64,
+    pub cache_hit_ratio: f64,
+    pub by_project: Vec<ProjectBreakdownJson>,
+    pub by_model: Vec<ModelBreakdownJson>,
+    pub by_day: Vec<DayBreakdownJson>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ProjectBreakdownJson {
+    pub project: String,
+    pub tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    pub sessions: u64,
+    pub pct: f64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ModelBreakdownJson {
+    pub model: String,
+    pub tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    pub pct: f64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct DayBreakdownJson {
+    pub date: String,
+    pub tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    pub sessions: u64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ConfigJson {
+    pub billing_mode: String,
+    pub show_cost: bool,
+    pub models: Vec<String>,
 }

@@ -3,6 +3,7 @@ mod config;
 mod cost;
 mod output;
 mod parser;
+mod server;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -95,6 +96,17 @@ enum Commands {
         #[arg(long, default_value_t = 60)]
         active_window: u64,
     },
+
+    /// Launch web dashboard
+    Dashboard {
+        /// Port to serve on
+        #[arg(long, default_value_t = 3141)]
+        port: u16,
+
+        /// Don't open browser automatically
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -173,6 +185,15 @@ fn main() -> Result<()> {
                 json: cli.json,
                 show_cost,
                 verbose: cli.verbose,
+            },
+        ),
+        Commands::Dashboard { port, no_open } => commands::dashboard::run(
+            &claude_dir,
+            &cfg,
+            &commands::dashboard::DashboardArgs {
+                port,
+                no_open,
+                show_cost,
             },
         ),
     }

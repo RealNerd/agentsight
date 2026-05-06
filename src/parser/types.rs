@@ -190,7 +190,7 @@ pub struct QueueOperationEntry {
 // ── Aggregated session data ────────────────────────────────────────
 
 /// Summary of a parsed session, computed from all entries.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SessionSummary {
     pub session_id: String,
     pub slug: Option<String>,
@@ -206,7 +206,7 @@ pub struct SessionSummary {
 
 /// Token usage and tools for a single assistant turn.
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TurnSummary {
     pub index: usize,
     pub timestamp: Option<DateTime<Utc>>,
