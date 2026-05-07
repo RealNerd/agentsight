@@ -602,6 +602,18 @@ pub fn detect_same_error_retries(entries: &[SessionEntry]) -> Vec<BashRetry> {
     retries
 }
 
+/// Collect per-model turn counts from a session's turns, sorted descending by count.
+pub fn collect_model_distribution(turns: &[TurnSummary]) -> Vec<(String, usize)> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for turn in turns {
+        let model = turn.model.as_deref().unwrap_or("unknown").to_string();
+        *counts.entry(model).or_default() += 1;
+    }
+    let mut result: Vec<(String, usize)> = counts.into_iter().collect();
+    result.sort_by_key(|item| std::cmp::Reverse(item.1));
+    result
+}
+
 /// Build plain-english recommendation strings from flagged patterns.
 pub fn generate_recommendations(
     cache: &CacheStability,
@@ -1229,6 +1241,17 @@ fn render_text(
         println!(" Cost:     {}", output::format_cost(cost.total()));
     }
 
+    // Model Distribution (only if multiple models used)
+    let model_distribution = collect_model_distribution(&summary.turns);
+    if model_distribution.len() > 1 {
+        println!();
+        println!(" ── Model Distribution ────────────────────────────────────");
+        for (model, count) in &model_distribution {
+            let pct = *count as f64 / summary.turns.len() as f64 * 100.0;
+            println!("  {:<30} {} turns ({:.0}%)", model, count, pct);
+        }
+    }
+
     // Cache Stability
     println!();
     println!(" ── Cache Stability ───────────────────────────────────────");
@@ -1401,7 +1424,30 @@ fn render_json(
     hit: f64,
     show_cost: bool,
 ) {
+    use crate::output::json::ModelDistributionJson;
+
     let session = output::json::session_to_json(summary, cost, hit, show_cost);
+
+    let model_dist = collect_model_distribution(&summary.turns);
+    let model_distribution = if model_dist.len() > 1 {
+        let total = summary.turns.len() as f64;
+        Some(
+            model_dist
+                .into_iter()
+                .map(|(model, count)| ModelDistributionJson {
+                    model,
+                    turns: count,
+                    pct: if total > 0.0 {
+                        (count as f64 / total * 1000.0).round() / 10.0
+                    } else {
+                        0.0
+                    },
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
 
     let json = DiagnoseJson {
         session,
@@ -1446,6 +1492,7 @@ fn render_json(
             .same_error_retries
             .as_ref()
             .map(|retries| retries.iter().map(bash_retry_to_json).collect()),
+        model_distribution,
         recommendations: diag.recommendations.clone(),
     };
 
@@ -1457,7 +1504,7 @@ fn render_json(
 
 // ── Project-level text rendering ──────────────────────────────────
 
-fn classification_str(c: &CacheClassification) -> &'static str {
+pub fn classification_str(c: &CacheClassification) -> &'static str {
     match c {
         CacheClassification::Stable => "stable",
         CacheClassification::Churning => "churning",

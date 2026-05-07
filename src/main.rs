@@ -76,6 +76,14 @@ enum Commands {
         /// Filter to a specific project (substring match)
         #[arg(long)]
         project: Option<String>,
+
+        /// Show detailed per-model comparison table
+        #[arg(long)]
+        by_model: bool,
+
+        /// Merge model versions by family (strip date suffixes)
+        #[arg(long)]
+        group_family: bool,
     },
 
     /// Live-watch all active sessions
@@ -145,6 +153,17 @@ enum Commands {
         /// Maximum number of lines to output (0 = all)
         #[arg(long, default_value_t = 0)]
         max_lines: usize,
+    },
+
+    /// Environment health check and baseline usage report
+    Health {
+        /// Environment audit only, skip session analysis
+        #[arg(long)]
+        quick: bool,
+
+        /// Filter baseline to a specific project (substring match)
+        #[arg(long)]
+        project: Option<String>,
     },
 
     /// Install AgentSight skills as Claude Code slash commands
@@ -218,7 +237,12 @@ fn main() -> Result<()> {
                 verbose: cli.verbose,
             },
         ),
-        Commands::Summary { days, project } => commands::summary::run(
+        Commands::Summary {
+            days,
+            project,
+            by_model,
+            group_family,
+        } => commands::summary::run(
             &claude_dir,
             &cfg,
             &commands::summary::SummaryArgs {
@@ -227,6 +251,8 @@ fn main() -> Result<()> {
                 json: cli.json,
                 show_cost,
                 verbose: cli.verbose,
+                by_model,
+                group_family,
             },
         ),
         Commands::Watch {
@@ -293,6 +319,17 @@ fn main() -> Result<()> {
                 identifier,
                 output,
                 max_lines,
+                verbose: cli.verbose,
+            },
+        ),
+        Commands::Health { quick, project } => commands::health::run(
+            &claude_dir,
+            &cfg,
+            &commands::health::HealthArgs {
+                quick,
+                project,
+                json: cli.json,
+                show_cost,
                 verbose: cli.verbose,
             },
         ),

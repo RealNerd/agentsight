@@ -238,6 +238,22 @@ pub struct ModelBreakdownJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost: Option<f64>,
     pub pct: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turns: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sessions: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_input_per_turn: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avg_output_per_turn: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_hit_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bash_loops_per_100t: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploration_ratio: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subagent_count: Option<u64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -295,6 +311,13 @@ pub struct ConfigJson {
 // ── Diagnose types ────────────────────────────────────────────────
 
 #[derive(Serialize, Clone)]
+pub struct ModelDistributionJson {
+    pub model: String,
+    pub turns: usize,
+    pub pct: f64,
+}
+
+#[derive(Serialize, Clone)]
 pub struct DiagnoseJson {
     pub session: SessionJson,
     pub cache_stability: CacheStabilityJson,
@@ -302,6 +325,8 @@ pub struct DiagnoseJson {
     pub tool_patterns: ToolPatternsJson,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub same_error_retries: Option<Vec<BashRetryJson>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_distribution: Option<Vec<ModelDistributionJson>>,
     pub recommendations: Vec<String>,
 }
 
@@ -406,4 +431,46 @@ pub struct ClaudeMdJson {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     pub recommendations: Vec<String>,
+}
+
+// ── Health types ──────────────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct HealthJson {
+    pub environment: EnvironmentCheckJson,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<BaselineReportJson>,
+    pub next_steps: Vec<NextStepJson>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct EnvironmentCheckJson {
+    pub grade: String,
+    pub items: Vec<CheckItemJson>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct CheckItemJson {
+    pub name: String,
+    pub status: String,
+    pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct BaselineReportJson {
+    pub session_count: u64,
+    pub total_tokens: u64,
+    pub project_count: usize,
+    pub global_avg_cache_hit: f64,
+    pub benchmarks: Vec<ProjectBenchmarkJson>,
+    pub top_recommendations: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct NextStepJson {
+    pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
 }
