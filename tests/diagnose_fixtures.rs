@@ -203,6 +203,44 @@ fn multi_model_turns_have_different_models() {
     );
 }
 
+#[test]
+fn multi_model_diagnose_shows_model_distribution() {
+    use agentsight::commands::diagnose::collect_model_distribution;
+
+    let summary = load_summary("multi_model.jsonl");
+    let distribution = collect_model_distribution(&summary.turns);
+
+    // Should have at least 2 models in the distribution
+    assert!(
+        distribution.len() >= 2,
+        "multi_model.jsonl should have >= 2 models in distribution, got {:?}",
+        distribution
+    );
+
+    // Total turns across all models should equal summary.turns.len()
+    let total_turns: usize = distribution.iter().map(|(_, count)| count).sum();
+    assert_eq!(
+        total_turns,
+        summary.turns.len(),
+        "distribution turn count should match total turns"
+    );
+}
+
+#[test]
+fn single_model_diagnose_no_model_distribution() {
+    use agentsight::commands::diagnose::collect_model_distribution;
+
+    let summary = load_summary("short_session.jsonl");
+    let distribution = collect_model_distribution(&summary.turns);
+
+    // Single-model session should have at most 1 entry
+    assert!(
+        distribution.len() <= 1,
+        "short_session.jsonl should have <= 1 model in distribution, got {:?}",
+        distribution
+    );
+}
+
 // ── Empty and malformed resilience ───────────────────────────────
 
 #[test]

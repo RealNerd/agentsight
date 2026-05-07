@@ -380,3 +380,19 @@ pub fn shorten_model(model: &str) -> &str {
     }
     model
 }
+
+/// Normalize a model name to its family by stripping date suffixes.
+/// e.g. `claude-opus-4-6-20250514` → `claude-opus-4-6`
+/// e.g. `claude-sonnet-4-20250514` → `claude-sonnet-4`
+/// Models without date suffixes are returned as-is.
+pub fn normalize_model_family(model: &str) -> &str {
+    // Look for the pattern `-20YYMMDD` at the end (8-digit date after `-20`)
+    if let Some(pos) = model.rfind("-20") {
+        let suffix = &model[pos + 1..];
+        // Verify it's a date-like suffix (all digits, 8 chars)
+        if suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_digit()) {
+            return &model[..pos];
+        }
+    }
+    model
+}

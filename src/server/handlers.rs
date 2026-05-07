@@ -292,6 +292,14 @@ pub async fn get_summary(
                     None
                 },
                 pct,
+                turns: None,
+                sessions: None,
+                avg_input_per_turn: None,
+                avg_output_per_turn: None,
+                cache_hit_pct: None,
+                bash_loops_per_100t: None,
+                exploration_ratio: None,
+                subagent_count: None,
             }
         })
         .collect();
