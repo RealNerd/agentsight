@@ -49,6 +49,10 @@ Claude Code writes session logs to `~/.claude/projects/{encoded-project}/{sessio
 - `~/.claude/` is read-only — we never modify Claude Code's files
 - Default pricing compiled in at build time; override via `~/.agentsight/config.toml`
 
+## CI
+
+GitHub Actions runs Format, Check, Clippy (`-D warnings`), Test, and Dependency audit on every push. Clippy treats all warnings as errors — fix them before pushing.
+
 ## Issue Tracking
 
-Uses `bd` (beads). Run `bd list` to see open work, `bd ready` for available tasks.
+Uses `bd` (beads) locally. Run `bd list` to see open work, `bd ready` for available tasks. The `.beads/` directory is gitignored — not tracked in the repo.
