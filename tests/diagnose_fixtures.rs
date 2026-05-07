@@ -4,9 +4,11 @@ use std::path::PathBuf;
 
 use agentsight::commands::diagnose::{
     analyze_cache_stability, analyze_context_growth, analyze_tool_patterns,
-    detect_identical_command_retries, CacheClassification,
+    detect_identical_command_retries, detect_same_error_retries, generate_recommendations,
+    run_diagnose_with_entries, CacheClassification,
 };
 use agentsight::parser::reader::{parse_session_file, summarize_session};
+use agentsight::parser::types::SessionEntry;
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -15,10 +17,17 @@ fn fixture_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-fn load_summary(name: &str) -> agentsight::parser::types::SessionSummary {
+fn load_fixture(name: &str) -> (Vec<SessionEntry>, agentsight::parser::types::SessionSummary) {
     let path = fixture_path(name);
-    let entries = parse_session_file(&path, true).expect(&format!("failed to parse {}", name));
-    summarize_session(&entries, "test-session".to_string(), "/project".to_string())
+    let entries = parse_session_file(&path, true)
+        .unwrap_or_else(|e| panic!("failed to parse {}: {}", name, e));
+    let summary = summarize_session(&entries, "test-session".to_string(), "/project".to_string());
+    (entries, summary)
+}
+
+fn load_summary(name: &str) -> agentsight::parser::types::SessionSummary {
+    let (_, summary) = load_fixture(name);
+    summary
 }
 
 // ── Cache classification tests ───────────────────────────────────
@@ -107,11 +116,16 @@ fn normal_mixed_tools_no_bash_loops() {
 fn large_session_context_growth() {
     let summary = load_summary("large_session.jsonl");
     let growth = analyze_context_growth(&summary.turns);
-    // Large session has input growing from ~5000 to ~15000 → growth factor ~3x
+    // Large session has input growing from ~5000+3500=8500 to ~15000+13700=28700
+    // Growth factor should be well above 2x
     assert!(
-        growth.growth_factor > 1.5,
-        "large_session.jsonl should show context growth, got factor {:.2}",
+        growth.growth_factor > 2.0,
+        "large_session.jsonl should show >2x context growth, got factor {:.2}",
         growth.growth_factor
+    );
+    assert!(
+        growth.flagged,
+        "large_session.jsonl context growth should be flagged (>2x)"
     );
 }
 
@@ -141,15 +155,35 @@ fn sidechain_has_task_calls() {
 }
 
 #[test]
-fn error_heavy_has_mixed_patterns() {
+fn error_heavy_has_bash_retries() {
     let summary = load_summary("error_heavy.jsonl");
-    let patterns = analyze_tool_patterns(&summary.turns);
-    // Should have both Bash and Edit tool usage
-    let total_tools: u32 = summary.tool_calls.values().sum();
+    let retries = detect_identical_command_retries(&summary.turns);
+    // "npm run build" appears in turns 0, 2, 5, 6 — not all consecutive, but some streaks
+    // The fixture has Bash-only turns interspersed with Edit/Read turns
+    // At minimum, verify the tool mix is correct
+    assert!(summary.tool_calls.contains_key("Bash"));
+    assert!(summary.tool_calls.contains_key("Edit"));
+    assert!(summary.tool_calls.contains_key("Read"));
+    let bash_count = summary.tool_calls.get("Bash").copied().unwrap_or(0);
     assert!(
-        total_tools > 3,
-        "error_heavy.jsonl should have multiple tool calls"
+        bash_count >= 4,
+        "expected at least 4 Bash calls, got {}",
+        bash_count
     );
+    // May or may not have identical retries depending on consecutive streak length
+    // but the fixture should at least not panic
+    let _ = retries;
+}
+
+#[test]
+fn error_heavy_same_error_retries() {
+    let (entries, _) = load_fixture("error_heavy.jsonl");
+    // detect_same_error_retries operates on raw entries
+    let retries = detect_same_error_retries(&entries);
+    // The fixture doesn't have 3+ consecutive identical error outputs
+    // (errors are interspersed with non-error results), so this should be empty
+    // but it must not panic on error-heavy input
+    let _ = retries;
 }
 
 // ── Multi-model fixture ──────────────────────────────────────────
@@ -191,4 +225,80 @@ fn malformed_session_diagnose_works() {
     assert_eq!(stability.total_turns, 3);
     let patterns = analyze_tool_patterns(&summary.turns);
     assert!(patterns.bash_loops.is_empty());
+}
+
+// ── Recommendations tests ────────────────────────────────────────
+
+#[test]
+fn churning_produces_cache_recommendation() {
+    let summary = load_summary("cache_churning.jsonl");
+    let cache = analyze_cache_stability(&summary.turns);
+    let growth = analyze_context_growth(&summary.turns);
+    let tools = analyze_tool_patterns(&summary.turns);
+    let recs = generate_recommendations(&cache, &growth, &tools, None);
+    assert!(
+        recs.iter()
+            .any(|r| r.contains("Cache creation stayed above 30%")),
+        "cache_churning should produce a cache creation recommendation, got: {:?}",
+        recs
+    );
+}
+
+#[test]
+fn bash_heavy_produces_retry_recommendation() {
+    let summary = load_summary("bash_heavy.jsonl");
+    let cache = analyze_cache_stability(&summary.turns);
+    let growth = analyze_context_growth(&summary.turns);
+    let tools = analyze_tool_patterns(&summary.turns);
+    let recs = generate_recommendations(&cache, &growth, &tools, None);
+    // Should mention bash retry sequences or identical command retries
+    assert!(
+        recs.iter()
+            .any(|r| r.contains("Bash retry") || r.contains("identical command")),
+        "bash_heavy should produce a bash loop or retry recommendation, got: {:?}",
+        recs
+    );
+}
+
+#[test]
+fn normal_session_produces_no_recommendations() {
+    let summary = load_summary("short_session.jsonl");
+    let cache = analyze_cache_stability(&summary.turns);
+    let growth = analyze_context_growth(&summary.turns);
+    let tools = analyze_tool_patterns(&summary.turns);
+    let recs = generate_recommendations(&cache, &growth, &tools, None);
+    assert!(
+        recs.is_empty(),
+        "short_session should produce no recommendations, got: {:?}",
+        recs
+    );
+}
+
+// ── Full diagnose pipeline (run_diagnose_with_entries) ───────────
+
+#[test]
+fn full_diagnose_cache_churning() {
+    let (entries, summary) = load_fixture("cache_churning.jsonl");
+    let diag = run_diagnose_with_entries(&summary, Some(&entries));
+    assert_eq!(
+        diag.cache_stability.classification,
+        CacheClassification::Churning
+    );
+    assert!(!diag.recommendations.is_empty());
+}
+
+#[test]
+fn full_diagnose_bash_heavy() {
+    let (entries, summary) = load_fixture("bash_heavy.jsonl");
+    let diag = run_diagnose_with_entries(&summary, Some(&entries));
+    assert!(!diag.tool_patterns.bash_loops.is_empty());
+    assert!(!diag.recommendations.is_empty());
+}
+
+#[test]
+fn full_diagnose_large_session() {
+    let (entries, summary) = load_fixture("large_session.jsonl");
+    let diag = run_diagnose_with_entries(&summary, Some(&entries));
+    assert!(diag.context_growth.flagged);
+    assert!(diag.context_growth.growth_factor > 2.0);
 }

@@ -19,7 +19,8 @@ fn parse_fixture(
     agentsight::parser::types::SessionSummary,
 ) {
     let path = fixture_path(name);
-    let entries = parse_session_file(&path, true).expect(&format!("failed to parse {}", name));
+    let entries = parse_session_file(&path, true)
+        .unwrap_or_else(|e| panic!("failed to parse {}: {}", name, e));
     let summary = summarize_session(&entries, "test-session".to_string(), "/project".to_string());
     (entries, summary)
 }
@@ -46,11 +47,12 @@ fn parse_empty_session() {
 #[test]
 fn parse_malformed() {
     let (entries, summary) = parse_fixture("malformed.jsonl");
-    // Some lines are bad JSON — should be skipped, not panic
-    // Valid entries: system, 2x user, 3x assistant, 1x progress → at least 6 parsed
+    // 14 lines total, 5 are bad JSON/empty → 9 valid JSON lines
+    // system + 3 user + 3 assistant + 1 progress + 1 "null" (Unknown) = 8-9 entries
+    // (null parses as valid JSON but won't match any SessionEntry variant tag → Unknown)
     assert!(
-        entries.len() >= 5,
-        "expected at least 5 parsed entries, got {}",
+        entries.len() >= 7,
+        "expected at least 7 parsed entries from valid JSON lines, got {}",
         entries.len()
     );
     assert_eq!(summary.turns.len(), 3);
@@ -104,6 +106,17 @@ fn parse_error_heavy() {
     let (_, summary) = parse_fixture("error_heavy.jsonl");
     assert_eq!(summary.turns.len(), 8);
     assert_eq!(summary.slug.as_deref(), Some("error-heavy"));
+    // Should have both Bash and Edit calls
+    assert!(summary.tool_calls.contains_key("Bash"));
+    assert!(summary.tool_calls.contains_key("Edit"));
+    assert!(summary.tool_calls.contains_key("Read"));
+    // Bash is the dominant tool
+    let bash_count = summary.tool_calls.get("Bash").copied().unwrap_or(0);
+    assert!(
+        bash_count >= 4,
+        "expected at least 4 Bash calls in error_heavy, got {}",
+        bash_count
+    );
 }
 
 #[test]
@@ -111,6 +124,15 @@ fn parse_cache_churning() {
     let (_, summary) = parse_fixture("cache_churning.jsonl");
     assert_eq!(summary.turns.len(), 10);
     assert_eq!(summary.slug.as_deref(), Some("cache-churn"));
+    // Every turn should have substantial cache_creation_input_tokens
+    for (i, turn) in summary.turns.iter().enumerate() {
+        assert!(
+            turn.usage.cache_creation_input_tokens > 1000,
+            "turn {} should have high cache creation, got {}",
+            i,
+            turn.usage.cache_creation_input_tokens
+        );
+    }
 }
 
 #[test]
@@ -158,27 +180,32 @@ fn no_real_home_dirs_in_fixtures() {
 
     for name in &fixture_names {
         let path = fixture_path(name);
-        let content = std::fs::read_to_string(&path).expect(&format!("failed to read {}", name));
-        // No real home directories should appear
-        assert!(
-            !content.contains("/Users/alice"),
-            "fixture {} contains /Users/alice",
-            name
-        );
-        assert!(
-            !content.contains("/Users/bob"),
-            "fixture {} contains /Users/bob",
-            name
-        );
-        assert!(
-            !content.contains("/home/alice"),
-            "fixture {} contains /home/alice",
-            name
-        );
-        // Should not contain real usernames (check common patterns)
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {}", name, e));
+
+        // Scan for any /Users/<name>/ or /home/<name>/ pattern (real home dirs)
+        for line in content.lines() {
+            for prefix in &["/Users/", "/home/"] {
+                if let Some(start) = line.find(prefix) {
+                    let after = &line[start + prefix.len()..];
+                    // Extract the username component (up to / or end)
+                    let username: String = after.chars().take_while(|c| *c != '/').collect();
+                    // "user" is our sanitized placeholder — anything else is a leak
+                    assert!(
+                        username.is_empty() || username == "user",
+                        "fixture {} contains real home dir: {}{}",
+                        name,
+                        prefix,
+                        username
+                    );
+                }
+            }
+        }
+
+        // Should not contain known real usernames
         assert!(
             !content.contains("sandvault"),
-            "fixture {} contains real username",
+            "fixture {} contains real username 'sandvault'",
             name
         );
     }
