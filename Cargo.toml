@@ -3,6 +3,12 @@ name = "agentsight"
 version = "0.1.0"
 edition = "2021"
 description = "Token attribution and session intelligence for Claude Code"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/RealNerd/agentsight"
+homepage = "https://github.com/RealNerd/agentsight"
+readme = "README.md"
+keywords = ["claude", "tokens", "analytics", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1"
