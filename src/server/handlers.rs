@@ -70,8 +70,8 @@ pub async fn list_sessions(
                 .partial_cmp(&a.cost.total())
                 .unwrap_or(std::cmp::Ordering::Equal)
         }),
-        "project" => items.sort_by(|a, b| a.project_path.cmp(&b.project_path)),
-        _ => items.sort_by(|a, b| b.summary.start_time.cmp(&a.summary.start_time)),
+        "project" => items.sort_by_key(|cs| cs.project_path.clone()),
+        _ => items.sort_by_key(|cs| std::cmp::Reverse(cs.summary.start_time)),
     }
 
     items.truncate(limit);

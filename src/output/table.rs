@@ -202,7 +202,7 @@ pub fn render_session_detail(
     if !summary.tool_calls.is_empty() {
         println!(" ── Tool Usage ─────────────────────────────────────");
         let mut tools: Vec<_> = summary.tool_calls.iter().collect();
-        tools.sort_by(|a, b| b.1.cmp(a.1));
+        tools.sort_by_key(|t| std::cmp::Reverse(t.1));
         for (tool, count) in tools {
             println!("  {:<18} {} calls", tool, count);
         }

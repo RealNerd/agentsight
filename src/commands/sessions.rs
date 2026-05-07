@@ -65,14 +65,12 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SessionsArgs) -> Result<()
     // Sort
     match args.sort_by {
         SortField::Cost => results.sort_by(|a, b| b.1.total().partial_cmp(&a.1.total()).unwrap()),
-        SortField::Tokens => results.sort_by(|a, b| {
-            b.0.total_usage
-                .total_tokens()
-                .cmp(&a.0.total_usage.total_tokens())
-        }),
+        SortField::Tokens => {
+            results.sort_by_key(|r| std::cmp::Reverse(r.0.total_usage.total_tokens()))
+        }
         SortField::Date => results.sort_by_key(|r| std::cmp::Reverse(r.0.start_time)),
         SortField::Turns => results.sort_by_key(|r| std::cmp::Reverse(r.0.turns.len())),
-        SortField::Project => results.sort_by(|a, b| a.0.project_path.cmp(&b.0.project_path)),
+        SortField::Project => results.sort_by_key(|r| r.0.project_path.clone()),
     }
 
     results.truncate(args.limit);
