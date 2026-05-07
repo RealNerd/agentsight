@@ -4,12 +4,17 @@ use axum::Json;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::commands::diagnose::{
+    analyze_claude_md, analyze_project_trend, compute_project_benchmark, rank_benchmarks,
+    CacheClassification, TrendDirection,
+};
 use crate::commands::timeline::{compute_concurrency, TimelineSession};
 use crate::cost::calculator::cache_hit_ratio;
 use crate::output::json::{
-    session_to_json, ConcurrencySlotJson, ConfigJson, DayBreakdownJson, ModelBreakdownJson,
-    ProjectBreakdownJson, SessionDetailJson, SessionJson, SessionListJson, SummaryJson,
-    TimelineJson, TimelineSessionJson, TokensJson, TurnDetailJson,
+    session_to_json, ClaudeMdJson, ConcurrencySlotJson, ConfigJson, DayBreakdownJson,
+    ModelBreakdownJson, ProjectBenchmarkJson, ProjectBreakdownJson, ProjectDiagnoseJson,
+    ProjectTrendJson, SessionDetailJson, SessionJson, SessionListJson, SummaryJson, TimelineJson,
+    TimelineSessionJson, TokensJson, TrendPointJson, TurnDetailJson,
 };
 use crate::output::table::shorten_project;
 
@@ -478,6 +483,194 @@ pub async fn get_timeline(
         concurrency: concurrency_json,
         peak_concurrent: peak,
         total_sessions: sessions.len(),
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct DiagnoseQuery {
+    pub days: Option<u64>,
+    pub project: Option<String>,
+    pub with_context: Option<bool>,
+}
+
+pub async fn get_diagnose(
+    State(state): State<AppState>,
+    Query(query): Query<DiagnoseQuery>,
+) -> Result<Json<ProjectDiagnoseJson>, StatusCode> {
+    state.cache.refresh().await;
+
+    let days = query.days.unwrap_or(7);
+    let with_context = query.with_context.unwrap_or(false);
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+
+    let all = state.cache.get_all().await;
+
+    // Group sessions by project, applying filters
+    let mut by_project: HashMap<String, Vec<&CachedSession>> = HashMap::new();
+    let mut project_paths: HashMap<String, String> = HashMap::new();
+
+    for cs in &all {
+        // Date filter
+        let in_range = cs.summary.start_time.is_some_and(|start| start >= cutoff);
+        if !in_range {
+            continue;
+        }
+
+        // Project filter
+        if let Some(ref filter) = query.project {
+            if !cs.project_path.contains(filter.as_str()) {
+                continue;
+            }
+        }
+
+        let short = shorten_project(&cs.project_path);
+        project_paths
+            .entry(short.clone())
+            .or_insert_with(|| cs.project_path.clone());
+        by_project.entry(short).or_default().push(cs.as_ref());
+    }
+
+    // Compute benchmarks using the per-session summaries
+    let mut benchmarks: Vec<crate::commands::diagnose::ProjectBenchmark> = by_project
+        .iter()
+        .map(|(project, sessions)| {
+            let summaries: Vec<_> = sessions.iter().map(|cs| cs.summary.clone()).collect();
+            compute_project_benchmark(project, &summaries)
+        })
+        .collect();
+    rank_benchmarks(&mut benchmarks);
+
+    // Global averages
+    let total_sessions: usize = benchmarks.iter().map(|b| b.session_count).sum();
+    let global_avg_cache_hit = if total_sessions > 0 {
+        benchmarks
+            .iter()
+            .map(|b| b.avg_cache_hit * b.session_count as f64)
+            .sum::<f64>()
+            / total_sessions as f64
+    } else {
+        0.0
+    };
+    let global_avg_tokens = if total_sessions > 0 {
+        benchmarks
+            .iter()
+            .map(|b| b.avg_tokens_per_session * b.session_count as u64)
+            .sum::<u64>()
+            / total_sessions as u64
+    } else {
+        0
+    };
+
+    // Trend (if specific project requested)
+    let trend = query.project.as_ref().and_then(|filter| {
+        let matching_key = by_project.keys().find(|k| k.contains(filter.as_str()));
+        matching_key.and_then(|key| {
+            let sessions = by_project.get(key)?;
+            let mut summaries: Vec<_> = sessions.iter().map(|cs| cs.summary.clone()).collect();
+            summaries.sort_by_key(|s| s.start_time);
+            let t = analyze_project_trend(&summaries);
+            Some(ProjectTrendJson {
+                direction: match t.direction {
+                    TrendDirection::Improving => "improving".to_string(),
+                    TrendDirection::Declining => "declining".to_string(),
+                    TrendDirection::Stable => "stable".to_string(),
+                },
+                recent_avg_cache_hit: t.recent_avg_cache_hit,
+                overall_avg_cache_hit: t.overall_avg_cache_hit,
+                points: t
+                    .points
+                    .iter()
+                    .map(|p| {
+                        let class_str = match p.classification {
+                            CacheClassification::Stable => "stable",
+                            CacheClassification::Churning => "churning",
+                            CacheClassification::Degrading => "degrading",
+                        };
+                        TrendPointJson {
+                            session_id: p.session_id.clone(),
+                            slug: p.slug.clone(),
+                            date: p.date.clone(),
+                            tokens: p.tokens,
+                            cache_hit: p.cache_hit,
+                            classification: class_str.to_string(),
+                        }
+                    })
+                    .collect(),
+            })
+        })
+    });
+
+    // CLAUDE.md analysis (if with_context and project specified)
+    let claude_md = if with_context {
+        query.project.as_ref().and_then(|filter| {
+            let matching_key = project_paths.keys().find(|k| k.contains(filter.as_str()));
+            matching_key.and_then(|key| {
+                let decoded = project_paths.get(key)?;
+                // Try to find CLAUDE.md by decoding the raw project path
+                let md = analyze_claude_md(decoded, true);
+                Some(ClaudeMdJson {
+                    exists: md.exists,
+                    path: md.path.as_ref().map(|p| p.display().to_string()),
+                    size_bytes: md.size_bytes,
+                    estimated_tokens: md.estimated_tokens,
+                    oversized: md.oversized,
+                    content: md.content,
+                    recommendations: md.recommendations,
+                })
+            })
+        })
+    } else {
+        None
+    };
+
+    // Recommendations
+    let mut recommendations = Vec::new();
+    for b in &benchmarks {
+        if b.avg_cache_hit < global_avg_cache_hit - 0.1 && b.session_count >= 2 {
+            recommendations.push(format!(
+                "Project \"{}\" has {:.1}% cache hit vs global {:.1}%.",
+                b.project,
+                b.avg_cache_hit * 100.0,
+                global_avg_cache_hit * 100.0
+            ));
+        }
+    }
+    if global_avg_cache_hit < 0.7 {
+        recommendations.push(
+            "Global cache hit is below 70%. Consider shorter, more focused sessions.".to_string(),
+        );
+    }
+
+    let benchmark_json: Vec<ProjectBenchmarkJson> = benchmarks
+        .iter()
+        .map(|b| {
+            let class_str = match b.dominant_classification {
+                CacheClassification::Stable => "stable",
+                CacheClassification::Churning => "churning",
+                CacheClassification::Degrading => "degrading",
+            };
+            ProjectBenchmarkJson {
+                project: b.project.clone(),
+                session_count: b.session_count,
+                avg_tokens_per_session: b.avg_tokens_per_session,
+                avg_cache_hit: b.avg_cache_hit,
+                dominant_classification: class_str.to_string(),
+                bash_loop_count: b.bash_loop_count,
+                exploration_count: b.exploration_count,
+                efficiency_score: b.efficiency_score,
+            }
+        })
+        .collect();
+
+    Ok(Json(ProjectDiagnoseJson {
+        period_days: days,
+        project_count: benchmark_json.len(),
+        global_avg_cache_hit,
+        global_avg_tokens,
+        benchmarks: benchmark_json,
+        trend,
+        claude_md,
+        recommendations,
     }))
 }
 

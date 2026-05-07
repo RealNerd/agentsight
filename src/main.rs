@@ -111,7 +111,7 @@ enum Commands {
 
     /// Diagnose session efficiency and suggest improvements
     Diagnose {
-        /// Session slug or UUID prefix (default: most recent)
+        /// Session slug or UUID prefix (omit for project-level overview)
         identifier: Option<String>,
 
         /// Filter to a specific project (substring match)
@@ -121,6 +121,10 @@ enum Commands {
         /// How many days back to look
         #[arg(long, default_value_t = 7)]
         days: u64,
+
+        /// Include CLAUDE.md analysis (requires --project)
+        #[arg(long)]
+        with_context: bool,
     },
 
     /// Launch web dashboard
@@ -247,6 +251,7 @@ fn main() -> Result<()> {
             identifier,
             project,
             days,
+            with_context,
         } => commands::diagnose::run(
             &claude_dir,
             &cfg,
@@ -257,6 +262,7 @@ fn main() -> Result<()> {
                 json: cli.json,
                 show_cost,
                 verbose: cli.verbose,
+                with_context,
             },
         ),
         Commands::Dashboard { port, no_open } => commands::dashboard::run(

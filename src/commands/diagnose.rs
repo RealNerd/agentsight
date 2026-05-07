@@ -1,13 +1,16 @@
 use anyhow::Result;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::cost::calculator::cache_hit_ratio;
 use crate::cost::calculate_usage_cost;
 use crate::output;
 use crate::output::json::{
-    BashLoopJson, CacheStabilityJson, ContextGrowthJson, DiagnoseJson, ToolPatternsJson,
+    BashLoopJson, CacheStabilityJson, ClaudeMdJson, ContextGrowthJson, DiagnoseJson,
+    ProjectBenchmarkJson, ProjectDiagnoseJson, ProjectTrendJson, ToolPatternsJson, TrendPointJson,
 };
+use crate::output::table::shorten_project;
 use crate::parser::reader::{self, decode_project_path};
 use crate::parser::session_index;
 use crate::parser::types::{SessionSummary, TurnSummary};
@@ -20,6 +23,7 @@ pub struct DiagnoseArgs {
     pub json: bool,
     pub show_cost: bool,
     pub verbose: bool,
+    pub with_context: bool,
 }
 
 // ── Analysis data structures ──────────────────────────────────────
@@ -68,6 +72,66 @@ pub struct ToolPatterns {
     pub exploration_flagged: bool,
     pub subagent_count: usize,
     pub subagent_flagged: bool,
+}
+
+// ── Project-level analysis data structures ────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ProjectBenchmark {
+    pub project: String,
+    pub session_count: usize,
+    pub avg_tokens_per_session: u64,
+    pub avg_cache_hit: f64,
+    pub dominant_classification: CacheClassification,
+    pub bash_loop_count: usize,
+    pub exploration_count: usize,
+    pub efficiency_score: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionTrendPoint {
+    pub session_id: String,
+    pub slug: Option<String>,
+    pub date: Option<String>,
+    pub tokens: u64,
+    pub cache_hit: f64,
+    pub classification: CacheClassification,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TrendDirection {
+    Improving,
+    Declining,
+    Stable,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectTrend {
+    pub points: Vec<SessionTrendPoint>,
+    pub direction: TrendDirection,
+    pub recent_avg_cache_hit: f64,
+    pub overall_avg_cache_hit: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaudeMdAnalysis {
+    pub exists: bool,
+    pub path: Option<PathBuf>,
+    pub size_bytes: u64,
+    pub estimated_tokens: u64,
+    pub oversized: bool,
+    pub content: Option<String>,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ProjectDiagnoseData {
+    pub benchmarks: Vec<ProjectBenchmark>,
+    pub global_avg_cache_hit: f64,
+    pub global_avg_tokens: u64,
+    pub trend: Option<ProjectTrend>,
+    pub claude_md: Option<ClaudeMdAnalysis>,
+    pub recommendations: Vec<String>,
 }
 
 // ── Pure analysis functions ───────────────────────────────────────
@@ -320,6 +384,265 @@ pub fn run_diagnose(summary: &SessionSummary) -> DiagnoseData {
     }
 }
 
+// ── Project-level analysis functions ──────────────────────────────
+
+/// Compute a benchmark for a single project from its session summaries.
+pub fn compute_project_benchmark(project: &str, summaries: &[SessionSummary]) -> ProjectBenchmark {
+    if summaries.is_empty() {
+        return ProjectBenchmark {
+            project: project.to_string(),
+            session_count: 0,
+            avg_tokens_per_session: 0,
+            avg_cache_hit: 0.0,
+            dominant_classification: CacheClassification::Stable,
+            bash_loop_count: 0,
+            exploration_count: 0,
+            efficiency_score: 0.0,
+        };
+    }
+
+    let mut total_tokens: u64 = 0;
+    let mut total_cache_hit: f64 = 0.0;
+    let mut classifications: HashMap<String, usize> = HashMap::new();
+    let mut bash_loop_total = 0;
+    let mut exploration_total = 0;
+
+    for summary in summaries {
+        let diag = run_diagnose(summary);
+        let hit = cache_hit_ratio(&summary.total_usage);
+
+        total_tokens += summary.total_usage.total_tokens();
+        total_cache_hit += hit;
+
+        let class_key = match diag.cache_stability.classification {
+            CacheClassification::Stable => "stable",
+            CacheClassification::Churning => "churning",
+            CacheClassification::Degrading => "degrading",
+        };
+        *classifications.entry(class_key.to_string()).or_default() += 1;
+
+        bash_loop_total += diag.tool_patterns.bash_loops.len();
+        if diag.tool_patterns.exploration_flagged {
+            exploration_total += 1;
+        }
+    }
+
+    let n = summaries.len();
+    let avg_tokens = total_tokens / n as u64;
+    let avg_cache_hit = total_cache_hit / n as f64;
+
+    let dominant_classification = {
+        let max_entry = classifications.iter().max_by_key(|(_, v)| *v);
+        match max_entry.map(|(k, _)| k.as_str()) {
+            Some("churning") => CacheClassification::Churning,
+            Some("degrading") => CacheClassification::Degrading,
+            _ => CacheClassification::Stable,
+        }
+    };
+
+    let score = efficiency_score(
+        avg_cache_hit,
+        bash_loop_total as f64 / n as f64,
+        exploration_total as f64 / n as f64,
+        &dominant_classification,
+    );
+
+    ProjectBenchmark {
+        project: project.to_string(),
+        session_count: n,
+        avg_tokens_per_session: avg_tokens,
+        avg_cache_hit,
+        dominant_classification,
+        bash_loop_count: bash_loop_total,
+        exploration_count: exploration_total,
+        efficiency_score: score,
+    }
+}
+
+/// Weighted composite efficiency score (0.0–1.0).
+/// - Cache hit: 40% weight (higher is better)
+/// - Low bash loops: 20% weight (fewer is better, 0 loops = 1.0, 2+ avg = 0.0)
+/// - Low exploration: 20% weight (fewer flagged sessions = better)
+/// - Stable classification: 20% weight (Stable = 1.0, Churning/Degrading = 0.0)
+pub fn efficiency_score(
+    avg_cache_hit: f64,
+    bash_loop_rate: f64,
+    exploration_rate: f64,
+    classification: &CacheClassification,
+) -> f64 {
+    let cache_score = avg_cache_hit.clamp(0.0, 1.0);
+    let bash_score = (1.0 - bash_loop_rate / 2.0).clamp(0.0, 1.0);
+    let exploration_score = (1.0 - exploration_rate).clamp(0.0, 1.0);
+    let class_score = match classification {
+        CacheClassification::Stable => 1.0,
+        CacheClassification::Churning | CacheClassification::Degrading => 0.0,
+    };
+
+    let score = cache_score * 0.4 + bash_score * 0.2 + exploration_score * 0.2 + class_score * 0.2;
+    (score * 100.0).round() / 100.0 // round to 2 decimal places
+}
+
+/// Sort benchmarks descending by efficiency score.
+pub fn rank_benchmarks(benchmarks: &mut [ProjectBenchmark]) {
+    benchmarks.sort_by(|a, b| {
+        b.efficiency_score
+            .partial_cmp(&a.efficiency_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
+// ── Project trend analysis ───────────────────────────────────────
+
+/// Analyze cache hit trend across sessions for a project.
+/// Sessions should be sorted by time (oldest first).
+pub fn analyze_project_trend(summaries: &[SessionSummary]) -> ProjectTrend {
+    let points: Vec<SessionTrendPoint> = summaries
+        .iter()
+        .map(|s| {
+            let hit = cache_hit_ratio(&s.total_usage);
+            let diag = run_diagnose(s);
+            SessionTrendPoint {
+                session_id: s.session_id.clone(),
+                slug: s.slug.clone(),
+                date: s.start_time.map(|t| t.format("%Y-%m-%d %H:%M").to_string()),
+                tokens: s.total_usage.total_tokens(),
+                cache_hit: hit,
+                classification: diag.cache_stability.classification,
+            }
+        })
+        .collect();
+
+    let overall_avg = if points.is_empty() {
+        0.0
+    } else {
+        points.iter().map(|p| p.cache_hit).sum::<f64>() / points.len() as f64
+    };
+
+    let recent_count = 5.min(points.len());
+    let recent_avg = if recent_count == 0 {
+        0.0
+    } else {
+        points[points.len() - recent_count..]
+            .iter()
+            .map(|p| p.cache_hit)
+            .sum::<f64>()
+            / recent_count as f64
+    };
+
+    let direction = if points.len() < 3 {
+        TrendDirection::Stable
+    } else {
+        let diff = recent_avg - overall_avg;
+        if diff > 0.05 {
+            TrendDirection::Improving
+        } else if diff < -0.05 {
+            TrendDirection::Declining
+        } else {
+            TrendDirection::Stable
+        }
+    };
+
+    ProjectTrend {
+        points,
+        direction,
+        recent_avg_cache_hit: recent_avg,
+        overall_avg_cache_hit: overall_avg,
+    }
+}
+
+// ── CLAUDE.md analysis ───────────────────────────────────────────
+
+/// Try to find a CLAUDE.md file at the decoded project path.
+pub fn find_claude_md(decoded_project_path: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(decoded_project_path).join("CLAUDE.md");
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Analyze a CLAUDE.md file for a project.
+pub fn analyze_claude_md(
+    decoded_project_path: &str,
+    include_content: bool,
+) -> ClaudeMdAnalysis {
+    match find_claude_md(decoded_project_path) {
+        None => ClaudeMdAnalysis {
+            exists: false,
+            path: None,
+            size_bytes: 0,
+            estimated_tokens: 0,
+            oversized: false,
+            content: None,
+            recommendations: vec![
+                "No CLAUDE.md found. Adding one with project structure and key commands improves cache stability.".to_string(),
+            ],
+        },
+        Some(path) => {
+            let content_result = std::fs::read_to_string(&path);
+            let (size_bytes, content_str) = match &content_result {
+                Ok(s) => (s.len() as u64, Some(s.clone())),
+                Err(_) => (0, None),
+            };
+            let estimated_tokens = size_bytes / 4;
+            let oversized = estimated_tokens > 8000;
+
+            let mut recommendations = Vec::new();
+            if oversized {
+                recommendations.push(format!(
+                    "CLAUDE.md is ~{} tokens ({}KB). Consider trimming to <8K tokens for better cache efficiency.",
+                    estimated_tokens, size_bytes / 1024
+                ));
+            }
+
+            ClaudeMdAnalysis {
+                exists: true,
+                path: Some(path),
+                size_bytes,
+                estimated_tokens,
+                oversized,
+                content: if include_content { content_str } else { None },
+                recommendations,
+            }
+        }
+    }
+}
+
+/// Generate project-level recommendations from benchmarks and global stats.
+fn generate_project_recommendations(
+    benchmarks: &[ProjectBenchmark],
+    global_avg_cache_hit: f64,
+) -> Vec<String> {
+    let mut recs = Vec::new();
+
+    for b in benchmarks {
+        if b.avg_cache_hit < global_avg_cache_hit - 0.1 && b.session_count >= 2 {
+            recs.push(format!(
+                "Project \"{}\" has {:.1}% cache hit vs global {:.1}%. Review session patterns for context churn.",
+                b.project,
+                b.avg_cache_hit * 100.0,
+                global_avg_cache_hit * 100.0
+            ));
+        }
+        if b.bash_loop_count > 3 {
+            recs.push(format!(
+                "Project \"{}\" had {} bash retry sequences. Add build/test commands to its CLAUDE.md.",
+                b.project, b.bash_loop_count
+            ));
+        }
+    }
+
+    if global_avg_cache_hit < 0.7 {
+        recs.push(
+            "Global cache hit is below 70%. Consider shorter, more focused sessions across all projects."
+                .to_string(),
+        );
+    }
+
+    recs
+}
+
 // ── CLI entry point ───────────────────────────────────────────────
 
 pub fn run(claude_dir: &Path, config: &Config, args: &DiagnoseArgs) -> Result<()> {
@@ -335,21 +658,133 @@ pub fn run(claude_dir: &Path, config: &Config, args: &DiagnoseArgs) -> Result<()
         session_files.iter().collect()
     };
 
-    let summary = match &args.identifier {
-        Some(id) => resolve_session(&filtered, id, args.verbose)?,
-        None => most_recent_session(&filtered, args.verbose)?,
-    };
+    // If an identifier is given, run single-session mode
+    if let Some(ref id) = args.identifier {
+        let summary = resolve_session(&filtered, id, args.verbose)?;
+        return run_single_session(config, args, &summary);
+    }
 
+    // No identifier: project-level overview
+    run_project_level(claude_dir, config, args, &filtered)
+}
+
+fn run_single_session(config: &Config, args: &DiagnoseArgs, summary: &SessionSummary) -> Result<()> {
     let pricing = lookup_pricing(config, summary.model.as_deref());
     let cost = calculate_usage_cost(&summary.total_usage, &pricing);
     let hit = cache_hit_ratio(&summary.total_usage);
 
-    let diag = run_diagnose(&summary);
+    let diag = run_diagnose(summary);
 
     if args.json {
-        render_json(&summary, &diag, &cost, hit, args.show_cost);
+        render_json(summary, &diag, &cost, hit, args.show_cost);
     } else {
-        render_text(&summary, &diag, &cost, hit, args.show_cost);
+        render_text(summary, &diag, &cost, hit, args.show_cost);
+    }
+
+    Ok(())
+}
+
+fn run_project_level(
+    _claude_dir: &Path,
+    _config: &Config,
+    args: &DiagnoseArgs,
+    session_files: &[&session_index::SessionFile],
+) -> Result<()> {
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(args.days as i64);
+
+    // Parse all sessions and group by project
+    let mut by_project: HashMap<String, Vec<SessionSummary>> = HashMap::new();
+    // Track the raw decoded path for each project key (for CLAUDE.md lookup)
+    let mut project_paths: HashMap<String, String> = HashMap::new();
+
+    for sf in session_files {
+        let decoded = decode_project_path(&sf.project_dir_name);
+        let entries = match reader::parse_session_file(&sf.path, args.verbose) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let summary = reader::summarize_session(&entries, sf.session_id.clone(), decoded.clone());
+
+        // Date filter
+        if let Some(start) = summary.start_time {
+            if start < cutoff {
+                continue;
+            }
+        }
+
+        let short = shorten_project(&decoded);
+        project_paths.entry(short.clone()).or_insert(decoded);
+        by_project.entry(short).or_default().push(summary);
+    }
+
+    // Compute benchmarks
+    let mut benchmarks: Vec<ProjectBenchmark> = by_project
+        .iter()
+        .map(|(project, summaries)| compute_project_benchmark(project, summaries))
+        .collect();
+    rank_benchmarks(&mut benchmarks);
+
+    // Global averages
+    let total_sessions: usize = benchmarks.iter().map(|b| b.session_count).sum();
+    let global_avg_cache_hit = if total_sessions > 0 {
+        benchmarks
+            .iter()
+            .map(|b| b.avg_cache_hit * b.session_count as f64)
+            .sum::<f64>()
+            / total_sessions as f64
+    } else {
+        0.0
+    };
+    let global_avg_tokens = if total_sessions > 0 {
+        benchmarks
+            .iter()
+            .map(|b| b.avg_tokens_per_session * b.session_count as u64)
+            .sum::<u64>()
+            / total_sessions as u64
+    } else {
+        0
+    };
+
+    // Trend (only if a specific project is selected)
+    let trend = args.project.as_ref().and_then(|filter| {
+        // Find the matching project key
+        let matching_key = by_project.keys().find(|k| k.contains(filter.as_str()));
+        matching_key.and_then(|key| {
+            let summaries = by_project.get(key)?;
+            let mut sorted = summaries.clone();
+            sorted.sort_by_key(|s| s.start_time);
+            Some(analyze_project_trend(&sorted))
+        })
+    });
+
+    // CLAUDE.md analysis (only if --with-context and --project specified)
+    let claude_md = if args.with_context {
+        args.project.as_ref().and_then(|filter| {
+            let matching_key = project_paths.keys().find(|k| k.contains(filter.as_str()));
+            matching_key.and_then(|key| {
+                let decoded = project_paths.get(key)?;
+                Some(analyze_claude_md(decoded, true))
+            })
+        })
+    } else {
+        None
+    };
+
+    let recommendations = generate_project_recommendations(&benchmarks, global_avg_cache_hit);
+
+    let data = ProjectDiagnoseData {
+        benchmarks,
+        global_avg_cache_hit,
+        global_avg_tokens,
+        trend,
+        claude_md,
+        recommendations,
+    };
+
+    if args.json {
+        render_project_json(&data, args.days);
+    } else {
+        render_project_text(&data, args.days);
     }
 
     Ok(())
@@ -410,41 +845,6 @@ fn resolve_session(
     }
 
     best.ok_or_else(|| anyhow::anyhow!("No session found matching '{}'", identifier))
-}
-
-fn most_recent_session(
-    session_files: &[&session_index::SessionFile],
-    verbose: bool,
-) -> Result<SessionSummary> {
-    if session_files.is_empty() {
-        anyhow::bail!("No session files found");
-    }
-
-    // Sort by file mtime, take most recent
-    let mut files_with_mtime: Vec<_> = session_files
-        .iter()
-        .filter_map(|sf| {
-            sf.path
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .map(|mtime| (*sf, mtime))
-        })
-        .collect();
-
-    files_with_mtime.sort_by_key(|item| std::cmp::Reverse(item.1));
-
-    let (sf, _) = files_with_mtime
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("No session files with readable metadata"))?;
-
-    let project_path = decode_project_path(&sf.project_dir_name);
-    let entries = reader::parse_session_file(&sf.path, verbose)?;
-    Ok(reader::summarize_session(
-        &entries,
-        sf.session_id.clone(),
-        project_path,
-    ))
 }
 
 fn lookup_pricing(config: &Config, model: Option<&str>) -> crate::config::ModelPricing {
@@ -636,6 +1036,201 @@ fn render_json(
             subagent_flagged: diag.tool_patterns.subagent_flagged,
         },
         recommendations: diag.recommendations.clone(),
+    };
+
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+// ── Project-level text rendering ──────────────────────────────────
+
+fn classification_str(c: &CacheClassification) -> &'static str {
+    match c {
+        CacheClassification::Stable => "stable",
+        CacheClassification::Churning => "churning",
+        CacheClassification::Degrading => "degrading",
+    }
+}
+
+fn render_project_text(data: &ProjectDiagnoseData, days: u64) {
+    println!();
+    println!(
+        " ── Project Diagnostics ({} days) ─────────────────────",
+        days
+    );
+
+    if data.benchmarks.is_empty() {
+        println!(" No sessions found for this period.");
+        println!();
+        return;
+    }
+
+    // Ranking table
+    println!(
+        " {:<3} {:<30} {:>8} {:>12} {:>9} {:>6}",
+        "#", "Project", "Sessions", "Tokens/Sess", "Cache Hit", "Score"
+    );
+    for (i, b) in data.benchmarks.iter().enumerate() {
+        println!(
+            " {:<3} {:<30} {:>8} {:>12} {:>9} {:>6}",
+            i + 1,
+            truncate_str(&b.project, 30),
+            b.session_count,
+            output::format_tokens(b.avg_tokens_per_session),
+            output::format_percent(b.avg_cache_hit),
+            format!("{:.2}", b.efficiency_score),
+        );
+    }
+    println!(
+        " Global Avg Cache Hit: {}",
+        output::format_percent(data.global_avg_cache_hit)
+    );
+
+    // Trend (if present)
+    if let Some(ref trend) = data.trend {
+        println!();
+        println!(" ── Project Trend ─────────────────────────────────────────");
+        let dir_str = match trend.direction {
+            TrendDirection::Improving => "IMPROVING",
+            TrendDirection::Declining => "DECLINING",
+            TrendDirection::Stable => "STABLE",
+        };
+        println!(" Direction: {}", dir_str);
+        println!(
+            " Recent (last 5): {} -> Overall: {}",
+            output::format_percent(trend.recent_avg_cache_hit),
+            output::format_percent(trend.overall_avg_cache_hit)
+        );
+
+        if !trend.points.is_empty() {
+            println!();
+            println!(
+                " {:<20} {:>12} {:>9} {:>10}",
+                "Date", "Tokens", "Cache Hit", "Class"
+            );
+            for p in &trend.points {
+                println!(
+                    " {:<20} {:>12} {:>9} {:>10}",
+                    p.date.as_deref().unwrap_or("—"),
+                    output::format_tokens(p.tokens),
+                    output::format_percent(p.cache_hit),
+                    classification_str(&p.classification),
+                );
+            }
+        }
+    }
+
+    // CLAUDE.md analysis
+    if let Some(ref md) = data.claude_md {
+        println!();
+        println!(" ── CLAUDE.md Analysis ────────────────────────────────────");
+        if md.exists {
+            println!(
+                " Path: {}",
+                md.path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            );
+            println!(
+                " Size: ~{} tokens ({} bytes) — {}",
+                md.estimated_tokens,
+                md.size_bytes,
+                if md.oversized { "OVERSIZED" } else { "Healthy" }
+            );
+        } else {
+            println!(" Not found.");
+        }
+
+        for rec in &md.recommendations {
+            println!(" [!] {}", rec);
+        }
+    }
+
+    // Recommendations
+    if !data.recommendations.is_empty() {
+        println!();
+        println!(" ── Recommendations ───────────────────────────────────────");
+        for (i, rec) in data.recommendations.iter().enumerate() {
+            println!(" {}. {}", i + 1, rec);
+        }
+    }
+
+    println!();
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max - 3])
+    }
+}
+
+// ── Project-level JSON rendering ─────────────────────────────────
+
+fn render_project_json(data: &ProjectDiagnoseData, days: u64) {
+    let benchmarks: Vec<ProjectBenchmarkJson> = data
+        .benchmarks
+        .iter()
+        .map(|b| ProjectBenchmarkJson {
+            project: b.project.clone(),
+            session_count: b.session_count,
+            avg_tokens_per_session: b.avg_tokens_per_session,
+            avg_cache_hit: b.avg_cache_hit,
+            dominant_classification: classification_str(&b.dominant_classification).to_string(),
+            bash_loop_count: b.bash_loop_count,
+            exploration_count: b.exploration_count,
+            efficiency_score: b.efficiency_score,
+        })
+        .collect();
+
+    let trend = data.trend.as_ref().map(|t| {
+        let dir = match t.direction {
+            TrendDirection::Improving => "improving",
+            TrendDirection::Declining => "declining",
+            TrendDirection::Stable => "stable",
+        };
+        ProjectTrendJson {
+            direction: dir.to_string(),
+            recent_avg_cache_hit: t.recent_avg_cache_hit,
+            overall_avg_cache_hit: t.overall_avg_cache_hit,
+            points: t
+                .points
+                .iter()
+                .map(|p| TrendPointJson {
+                    session_id: p.session_id.clone(),
+                    slug: p.slug.clone(),
+                    date: p.date.clone(),
+                    tokens: p.tokens,
+                    cache_hit: p.cache_hit,
+                    classification: classification_str(&p.classification).to_string(),
+                })
+                .collect(),
+        }
+    });
+
+    let claude_md = data.claude_md.as_ref().map(|md| ClaudeMdJson {
+        exists: md.exists,
+        path: md.path.as_ref().map(|p| p.display().to_string()),
+        size_bytes: md.size_bytes,
+        estimated_tokens: md.estimated_tokens,
+        oversized: md.oversized,
+        content: md.content.clone(),
+        recommendations: md.recommendations.clone(),
+    });
+
+    let json = ProjectDiagnoseJson {
+        period_days: days,
+        project_count: data.benchmarks.len(),
+        global_avg_cache_hit: data.global_avg_cache_hit,
+        global_avg_tokens: data.global_avg_tokens,
+        benchmarks,
+        trend,
+        claude_md,
+        recommendations: data.recommendations.clone(),
     };
 
     println!(
@@ -877,5 +1472,203 @@ mod tests {
         assert!(recs[2].contains("Bash"));
         assert!(recs[3].contains("Read:Edit"));
         assert!(recs[4].contains("Task"));
+    }
+
+    // ── Project-level analysis tests ──────────────────────────────
+
+    fn make_session_summary(id: &str, project: &str, cache_read_pct: f64, turns_count: usize) -> SessionSummary {
+        // cache_read_pct is 0.0-1.0 fraction of input that comes from cache reads
+        let total_input = 100_000u64;
+        let cache_read = (total_input as f64 * cache_read_pct) as u64;
+        let input = total_input - cache_read;
+
+        let turns: Vec<TurnSummary> = (0..turns_count)
+            .map(|i| {
+                let per_turn_input = input / turns_count as u64;
+                let per_turn_cache = cache_read / turns_count as u64;
+                if i < 3 {
+                    make_turn(i, per_turn_input, 500, per_turn_cache, 100, vec!["Read", "Edit"])
+                } else {
+                    make_turn(i, per_turn_input, 50, per_turn_cache, 100, vec!["Read", "Edit"])
+                }
+            })
+            .collect();
+
+        use crate::parser::types::TokenUsage;
+        let mut total_usage = TokenUsage::default();
+        for t in &turns {
+            total_usage += t.usage.clone();
+        }
+
+        SessionSummary {
+            session_id: id.to_string(),
+            slug: Some(format!("{}-slug", id)),
+            project_path: project.to_string(),
+            start_time: Some(chrono::Utc::now()),
+            end_time: Some(chrono::Utc::now() + chrono::Duration::minutes(30)),
+            total_usage,
+            turns,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_efficiency_score_perfect() {
+        // Perfect: high cache, no bash loops, no exploration, stable
+        let score = efficiency_score(0.95, 0.0, 0.0, &CacheClassification::Stable);
+        assert!(score > 0.9, "expected >0.9, got {}", score);
+    }
+
+    #[test]
+    fn test_efficiency_score_poor() {
+        // Poor: low cache, lots of bash, exploration, churning
+        let score = efficiency_score(0.3, 3.0, 1.0, &CacheClassification::Churning);
+        assert!(score < 0.3, "expected <0.3, got {}", score);
+    }
+
+    #[test]
+    fn test_compute_project_benchmark_single_session() {
+        let summary = make_session_summary("abc-123", "/foo/bar", 0.85, 10);
+        let benchmark = compute_project_benchmark("foo/bar", &[summary]);
+
+        assert_eq!(benchmark.project, "foo/bar");
+        assert_eq!(benchmark.session_count, 1);
+        assert!(benchmark.avg_tokens_per_session > 0);
+        assert!(benchmark.efficiency_score > 0.0);
+    }
+
+    #[test]
+    fn test_compute_project_benchmark_multiple_sessions() {
+        let s1 = make_session_summary("aaa", "/foo/bar", 0.90, 10);
+        let s2 = make_session_summary("bbb", "/foo/bar", 0.80, 10);
+        let s3 = make_session_summary("ccc", "/foo/bar", 0.85, 10);
+
+        let benchmark = compute_project_benchmark("foo/bar", &[s1, s2, s3]);
+
+        assert_eq!(benchmark.session_count, 3);
+        // avg cache hit should be somewhere near 0.85
+        assert!(benchmark.avg_cache_hit > 0.5);
+    }
+
+    #[test]
+    fn test_rank_benchmarks_ordering() {
+        let mut benchmarks = vec![
+            ProjectBenchmark {
+                project: "low".to_string(),
+                session_count: 1,
+                avg_tokens_per_session: 100_000,
+                avg_cache_hit: 0.3,
+                dominant_classification: CacheClassification::Churning,
+                bash_loop_count: 5,
+                exploration_count: 2,
+                efficiency_score: 0.2,
+            },
+            ProjectBenchmark {
+                project: "high".to_string(),
+                session_count: 1,
+                avg_tokens_per_session: 100_000,
+                avg_cache_hit: 0.95,
+                dominant_classification: CacheClassification::Stable,
+                bash_loop_count: 0,
+                exploration_count: 0,
+                efficiency_score: 0.95,
+            },
+            ProjectBenchmark {
+                project: "mid".to_string(),
+                session_count: 1,
+                avg_tokens_per_session: 100_000,
+                avg_cache_hit: 0.7,
+                dominant_classification: CacheClassification::Stable,
+                bash_loop_count: 1,
+                exploration_count: 0,
+                efficiency_score: 0.7,
+            },
+        ];
+
+        rank_benchmarks(&mut benchmarks);
+
+        assert_eq!(benchmarks[0].project, "high");
+        assert_eq!(benchmarks[1].project, "mid");
+        assert_eq!(benchmarks[2].project, "low");
+    }
+
+    #[test]
+    fn test_analyze_project_trend_stable() {
+        // All sessions have similar cache hit → Stable
+        let summaries: Vec<SessionSummary> = (0..5)
+            .map(|i| make_session_summary(&format!("s{}", i), "/foo/bar", 0.85, 10))
+            .collect();
+
+        let trend = analyze_project_trend(&summaries);
+        assert_eq!(trend.direction, TrendDirection::Stable);
+        assert_eq!(trend.points.len(), 5);
+    }
+
+    #[test]
+    fn test_analyze_project_trend_improving() {
+        // Early sessions poor, recent sessions good → Improving
+        let mut summaries: Vec<SessionSummary> = Vec::new();
+        for i in 0..8 {
+            let cache = if i < 3 { 0.50 } else { 0.92 };
+            summaries.push(make_session_summary(&format!("s{}", i), "/foo/bar", cache, 10));
+        }
+
+        let trend = analyze_project_trend(&summaries);
+        assert_eq!(trend.direction, TrendDirection::Improving);
+    }
+
+    #[test]
+    fn test_analyze_project_trend_declining() {
+        // Early sessions good, recent sessions poor → Declining
+        let mut summaries: Vec<SessionSummary> = Vec::new();
+        for i in 0..8 {
+            let cache = if i < 3 { 0.92 } else { 0.50 };
+            summaries.push(make_session_summary(&format!("s{}", i), "/foo/bar", cache, 10));
+        }
+
+        let trend = analyze_project_trend(&summaries);
+        assert_eq!(trend.direction, TrendDirection::Declining);
+    }
+
+    #[test]
+    fn test_analyze_claude_md_missing() {
+        // Path that doesn't exist → missing analysis
+        let analysis = analyze_claude_md("/nonexistent/path/that/does/not/exist", false);
+        assert!(!analysis.exists);
+        assert!(analysis.path.is_none());
+        assert!(!analysis.recommendations.is_empty());
+        assert!(analysis.recommendations[0].contains("No CLAUDE.md"));
+    }
+
+    #[test]
+    fn test_efficiency_score_boundaries() {
+        // Cache hit = 0, all other factors bad
+        let score = efficiency_score(0.0, 5.0, 1.0, &CacheClassification::Degrading);
+        assert!(score >= 0.0 && score <= 1.0);
+
+        // Cache hit = 1, all other factors perfect
+        let score = efficiency_score(1.0, 0.0, 0.0, &CacheClassification::Stable);
+        assert!(score >= 0.0 && score <= 1.0);
+        assert!((score - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_project_recommendations_low_cache() {
+        let benchmarks = vec![
+            ProjectBenchmark {
+                project: "bad-project".to_string(),
+                session_count: 3,
+                avg_tokens_per_session: 100_000,
+                avg_cache_hit: 0.5,
+                dominant_classification: CacheClassification::Churning,
+                bash_loop_count: 0,
+                exploration_count: 0,
+                efficiency_score: 0.4,
+            },
+        ];
+
+        let recs = generate_project_recommendations(&benchmarks, 0.85);
+        assert!(!recs.is_empty());
+        assert!(recs.iter().any(|r| r.contains("bad-project")));
     }
 }

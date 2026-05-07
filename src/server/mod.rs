@@ -32,6 +32,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/config", get(handlers::get_config))
         .route("/projects", get(handlers::list_projects))
         .route("/timeline", get(handlers::get_timeline))
+        .route("/diagnose", get(handlers::get_diagnose))
         .route("/watch/stream", get(sse::watch_stream))
         .route("/health", get(handlers::health));
 

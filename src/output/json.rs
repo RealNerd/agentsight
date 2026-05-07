@@ -336,3 +336,62 @@ pub struct BashLoopJson {
     pub start_turn: usize,
     pub length: usize,
 }
+
+// ── Project-level Diagnose types ──────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct ProjectDiagnoseJson {
+    pub period_days: u64,
+    pub project_count: usize,
+    pub global_avg_cache_hit: f64,
+    pub global_avg_tokens: u64,
+    pub benchmarks: Vec<ProjectBenchmarkJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trend: Option<ProjectTrendJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub claude_md: Option<ClaudeMdJson>,
+    pub recommendations: Vec<String>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ProjectBenchmarkJson {
+    pub project: String,
+    pub session_count: usize,
+    pub avg_tokens_per_session: u64,
+    pub avg_cache_hit: f64,
+    pub dominant_classification: String,
+    pub bash_loop_count: usize,
+    pub exploration_count: usize,
+    pub efficiency_score: f64,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ProjectTrendJson {
+    pub direction: String,
+    pub recent_avg_cache_hit: f64,
+    pub overall_avg_cache_hit: f64,
+    pub points: Vec<TrendPointJson>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct TrendPointJson {
+    pub session_id: String,
+    pub slug: Option<String>,
+    pub date: Option<String>,
+    pub tokens: u64,
+    pub cache_hit: f64,
+    pub classification: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct ClaudeMdJson {
+    pub exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    pub size_bytes: u64,
+    pub estimated_tokens: u64,
+    pub oversized: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    pub recommendations: Vec<String>,
+}

@@ -29,6 +29,8 @@ function route() {
         renderSummaryPage();
     } else if (path === '/timeline') {
         renderTimelinePage();
+    } else if (path === '/diagnose') {
+        renderDiagnosePage();
     } else if (path === '/watch') {
         renderWatchPage();
     } else {
@@ -1019,6 +1021,218 @@ function renderWatchTable(snapshot, showCost) {
             &mdash; Last update: ${new Date(snapshot.timestamp).toLocaleTimeString()}
         </div>
     `;
+}
+
+// ── Diagnose Page ─────────────────────────────────
+async function renderDiagnosePage() {
+    const app = document.getElementById('app');
+    app.innerHTML = '<div class="loading">Loading diagnostics...</div>';
+    destroyAllCharts();
+
+    try {
+        const [projects, config] = await Promise.all([
+            api.projects(),
+            loadConfig(),
+        ]);
+
+        app.innerHTML = `
+            <h1 class="page-title">Diagnose</h1>
+            <div class="filter-bar">
+                <label>Days</label>
+                <select id="diag-days">
+                    <option value="3">3</option>
+                    <option value="7" selected>7</option>
+                    <option value="14">14</option>
+                    <option value="30">30</option>
+                </select>
+                <label>Project</label>
+                <select id="diag-project">
+                    <option value="">All</option>
+                    ${projects.map(p => `<option value="${p}">${p}</option>`).join('')}
+                </select>
+                <label class="filter-checkbox">
+                    <input type="checkbox" id="diag-context"> CLAUDE.md
+                </label>
+            </div>
+            <div id="diag-content"><div class="loading">Loading...</div></div>
+        `;
+
+        async function loadDiagnose() {
+            const days = document.getElementById('diag-days').value;
+            const project = document.getElementById('diag-project').value;
+            const withContext = document.getElementById('diag-context').checked;
+            const data = await api.diagnose({ days, project: project || undefined, with_context: withContext || undefined });
+            renderDiagnoseContent(data, config.show_cost);
+        }
+
+        document.getElementById('diag-days').addEventListener('change', loadDiagnose);
+        document.getElementById('diag-project').addEventListener('change', loadDiagnose);
+        document.getElementById('diag-context').addEventListener('change', loadDiagnose);
+
+        await loadDiagnose();
+
+    } catch (err) {
+        app.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+    }
+}
+
+function renderDiagnoseContent(data, showCost) {
+    const container = document.getElementById('diag-content');
+    if (!container) return;
+    destroyAllCharts();
+
+    if (data.project_count === 0) {
+        container.innerHTML = '<div class="empty-state">No sessions found for this period.</div>';
+        return;
+    }
+
+    // Find best and worst
+    const best = data.benchmarks[0];
+    const worst = data.benchmarks[data.benchmarks.length - 1];
+
+    container.innerHTML = `
+        <div class="kpi-grid">
+            <div class="kpi-card">
+                <div class="kpi-label">Projects</div>
+                <div class="kpi-value">${data.project_count}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Global Avg Cache Hit</div>
+                <div class="kpi-value green">${formatPercent(data.global_avg_cache_hit)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Avg Tokens/Session</div>
+                <div class="kpi-value">${formatTokens(data.global_avg_tokens)}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Best Project</div>
+                <div class="kpi-value accent">${best ? best.project : '—'}</div>
+                ${best ? `<div class="kpi-sub">Score: ${best.efficiency_score.toFixed(2)}</div>` : ''}
+            </div>
+        </div>
+
+        <h3 class="page-title">Project Ranking</h3>
+        <div id="diag-ranking"></div>
+
+        ${data.trend ? `
+        <h3 class="page-title">Project Trend</h3>
+        <div class="trend-header">
+            <span class="trend-badge ${data.trend.direction}">${data.trend.direction.toUpperCase()}</span>
+            <span>Recent (last 5): ${formatPercent(data.trend.recent_avg_cache_hit)} &rarr; Overall: ${formatPercent(data.trend.overall_avg_cache_hit)}</span>
+        </div>
+        <div class="chart-grid">
+            <div class="chart-card" style="grid-column: 1 / -1;">
+                <div class="chart-title">Cache Hit Over Sessions</div>
+                <div class="chart-container"><canvas id="diag-trend-chart"></canvas></div>
+            </div>
+        </div>
+        <div id="diag-trend-table"></div>
+        ` : ''}
+
+        ${data.claude_md ? `
+        <h3 class="page-title">CLAUDE.md Analysis</h3>
+        <div class="claude-md-panel">
+            ${data.claude_md.exists
+                ? `<div class="claude-md-status">
+                    <span class="status-icon found">[*]</span>
+                    <span>${data.claude_md.path || ''}</span>
+                   </div>
+                   <div class="claude-md-meta">
+                       ~${data.claude_md.estimated_tokens.toLocaleString()} tokens (${data.claude_md.size_bytes.toLocaleString()} bytes)
+                       — <span class="${data.claude_md.oversized ? 'warn-text' : 'good-text'}">${data.claude_md.oversized ? 'OVERSIZED' : 'Healthy'}</span>
+                   </div>
+                   ${data.claude_md.content ? `<pre class="claude-md-content">${escapeHtml(data.claude_md.content)}</pre>` : ''}`
+                : `<div class="claude-md-status">
+                    <span class="status-icon missing">[!]</span>
+                    <span>No CLAUDE.md found</span>
+                   </div>`
+            }
+            ${data.claude_md.recommendations.length > 0
+                ? data.claude_md.recommendations.map(r => `<div class="insight-item"><span class="insight-icon warn">[!]</span><span>${r}</span></div>`).join('')
+                : ''
+            }
+        </div>
+        ` : ''}
+
+        ${data.recommendations.length > 0 ? `
+        <h3 class="page-title">Recommendations</h3>
+        <div class="insights-panel">
+            ${data.recommendations.map(r => `
+                <div class="insight-item">
+                    <span class="insight-icon warn">[!]</span>
+                    <span>${r}</span>
+                </div>
+            `).join('')}
+        </div>
+        ` : ''}
+    `;
+
+    // Ranking table
+    const rankContainer = document.getElementById('diag-ranking');
+    if (rankContainer && data.benchmarks.length > 0) {
+        sortableTable({
+            container: rankContainer,
+            columns: [
+                { key: 'project', label: 'Project', sortValue: r => r.project.toLowerCase(), format: r => r.project },
+                { key: 'sessions', label: 'Sessions', align: 'right', sortValue: r => r.session_count, format: r => r.session_count },
+                { key: 'tokens', label: 'Tokens/Sess', align: 'right', sortValue: r => r.avg_tokens_per_session, format: r => formatTokens(r.avg_tokens_per_session) },
+                { key: 'cache', label: 'Cache Hit', align: 'right', sortValue: r => r.avg_cache_hit, format: r => formatPercent(r.avg_cache_hit) },
+                { key: 'class', label: 'Classification', sortValue: r => r.dominant_classification, format: r => r.dominant_classification },
+                { key: 'score', label: 'Score', align: 'right', sortValue: r => r.efficiency_score,
+                  format: r => `<span class="score-badge ${r.efficiency_score > 0.8 ? 'good' : r.efficiency_score > 0.5 ? 'warn' : 'bad'}">${r.efficiency_score.toFixed(2)}</span>` },
+            ],
+            rows: data.benchmarks,
+            defaultSort: 'score',
+            defaultDesc: true,
+            onRowClick: r => {
+                document.getElementById('diag-project').value = r.project;
+                document.getElementById('diag-project').dispatchEvent(new Event('change'));
+            },
+        });
+    }
+
+    // Trend chart
+    if (data.trend && data.trend.points.length > 0) {
+        const points = data.trend.points;
+        createLineChart('diag-trend-chart',
+            points.map(p => p.date ? p.date.slice(5) : p.session_id.slice(0, 6)),
+            [{
+                label: 'Cache Hit',
+                data: points.map(p => p.cache_hit * 100),
+                borderColor: COLORS.green,
+                backgroundColor: COLORS.green + '20',
+                fill: true,
+            }],
+            {
+                formatValue: v => v.toFixed(1) + '%',
+                yTickFormat: v => v + '%',
+            }
+        );
+
+        // Trend detail table
+        const trendContainer = document.getElementById('diag-trend-table');
+        if (trendContainer) {
+            sortableTable({
+                container: trendContainer,
+                columns: [
+                    { key: 'date', label: 'Date', sortValue: r => r.date || '', format: r => r.date || '—' },
+                    { key: 'slug', label: 'Session', sortValue: r => (r.slug || '').toLowerCase(), format: r => r.slug || r.session_id.slice(0, 8) },
+                    { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens, format: r => formatTokens(r.tokens) },
+                    { key: 'cache', label: 'Cache Hit', align: 'right', sortValue: r => r.cache_hit, format: r => formatPercent(r.cache_hit) },
+                    { key: 'class', label: 'Classification', sortValue: r => r.classification, format: r => r.classification },
+                ],
+                rows: points,
+                defaultSort: 'date',
+                defaultDesc: true,
+            });
+        }
+    }
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 // Clean up SSE when navigating away from watch page
