@@ -7,13 +7,14 @@ use crate::cost::calculator::cache_hit_ratio;
 use crate::cost::calculate_usage_cost;
 use crate::output;
 use crate::output::json::{
-    BashLoopJson, CacheStabilityJson, ClaudeMdJson, ContextGrowthJson, DiagnoseJson,
-    ProjectBenchmarkJson, ProjectDiagnoseJson, ProjectTrendJson, ToolPatternsJson, TrendPointJson,
+    BashLoopJson, BashRetryJson, CacheStabilityJson, ClaudeMdJson, ContextGrowthJson,
+    DiagnoseJson, ProjectBenchmarkJson, ProjectDiagnoseJson, ProjectTrendJson, ToolPatternsJson,
+    TrendPointJson,
 };
 use crate::output::table::shorten_project;
 use crate::parser::reader::{self, decode_project_path};
 use crate::parser::session_index;
-use crate::parser::types::{SessionSummary, TurnSummary};
+use crate::parser::types::{ContentBlock, SessionEntry, SessionSummary, TurnSummary};
 
 #[allow(dead_code)]
 pub struct DiagnoseArgs {
@@ -33,6 +34,9 @@ pub struct DiagnoseData {
     pub cache_stability: CacheStability,
     pub context_growth: ContextGrowth,
     pub tool_patterns: ToolPatterns,
+    /// Same-error retries detected from entry-level analysis.
+    /// None when entry-level analysis is not available (project-level path).
+    pub same_error_retries: Option<Vec<BashRetry>>,
     pub recommendations: Vec<String>,
 }
 
@@ -65,9 +69,23 @@ pub struct BashLoop {
     pub length: usize,
 }
 
+#[derive(Debug, Clone)]
+pub enum BashRetryPattern {
+    IdenticalCommand { command: String },
+    SameError { command: String, error_snippet: String },
+}
+
+#[derive(Debug, Clone)]
+pub struct BashRetry {
+    pub pattern: BashRetryPattern,
+    pub start_turn: usize,
+    pub length: usize,
+}
+
 #[derive(Debug)]
 pub struct ToolPatterns {
     pub bash_loops: Vec<BashLoop>,
+    pub bash_retries: Vec<BashRetry>,
     pub read_edit_ratio: f64,
     pub exploration_flagged: bool,
     pub subagent_count: usize,
@@ -84,6 +102,7 @@ pub struct ProjectBenchmark {
     pub avg_cache_hit: f64,
     pub dominant_classification: CacheClassification,
     pub bash_loop_count: usize,
+    pub bash_retry_count: usize,
     pub exploration_count: usize,
     pub efficiency_score: f64,
 }
@@ -301,8 +320,11 @@ pub fn analyze_tool_patterns(turns: &[TurnSummary]) -> ToolPatterns {
         0.0
     };
 
+    let bash_retries = detect_identical_command_retries(turns);
+
     ToolPatterns {
         bash_loops,
+        bash_retries,
         read_edit_ratio,
         exploration_flagged: read_edit_ratio > 5.0,
         subagent_count: task_count,
@@ -310,11 +332,283 @@ pub fn analyze_tool_patterns(turns: &[TurnSummary]) -> ToolPatterns {
     }
 }
 
+/// Detect 3+ consecutive turns where the first bash command is identical.
+pub fn detect_identical_command_retries(turns: &[TurnSummary]) -> Vec<BashRetry> {
+    let mut retries = Vec::new();
+    let mut streak_start: Option<usize> = None;
+    let mut streak_len = 0;
+    let mut streak_cmd: Option<&str> = None;
+
+    for (i, turn) in turns.iter().enumerate() {
+        let first_cmd = turn.bash_commands.first().map(|s| s.as_str());
+
+        let continues = match (first_cmd, streak_cmd) {
+            (Some(current), Some(prev)) => current == prev,
+            _ => false,
+        };
+
+        if continues {
+            streak_len += 1;
+        } else {
+            // Flush previous streak
+            if streak_len >= 3 {
+                if let Some(cmd) = streak_cmd {
+                    retries.push(BashRetry {
+                        pattern: BashRetryPattern::IdenticalCommand {
+                            command: cmd.to_string(),
+                        },
+                        start_turn: streak_start.unwrap(),
+                        length: streak_len,
+                    });
+                }
+            }
+
+            // Start new streak if this turn has a bash command
+            if first_cmd.is_some() {
+                streak_start = Some(i);
+                streak_len = 1;
+                streak_cmd = first_cmd;
+            } else {
+                streak_start = None;
+                streak_len = 0;
+                streak_cmd = None;
+            }
+        }
+    }
+
+    // Flush trailing streak
+    if streak_len >= 3 {
+        if let Some(cmd) = streak_cmd {
+            retries.push(BashRetry {
+                pattern: BashRetryPattern::IdenticalCommand {
+                    command: cmd.to_string(),
+                },
+                start_turn: streak_start.unwrap(),
+                length: streak_len,
+            });
+        }
+    }
+
+    retries
+}
+
+// ── Same-error detection (entry-level) ────────────────────────
+
+/// Strip ANSI escape sequences from a string.
+fn strip_ansi(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // Skip ESC [ ... <letter> sequences
+            if chars.peek() == Some(&'[') {
+                chars.next(); // consume '['
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Normalize an error string for comparison: strip ANSI, shorten paths, normalize line numbers, truncate.
+fn normalize_error(s: &str) -> String {
+    let stripped = strip_ansi(s);
+
+    // Shorten filesystem paths to last 2 segments
+    let mut normalized = String::with_capacity(stripped.len());
+    let mut i = 0;
+    let bytes = stripped.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] != b' ' {
+            // Found start of a path — collect the whole path
+            let start = i;
+            let mut end = i + 1;
+            while end < bytes.len()
+                && !matches!(bytes[end], b' ' | b'\n' | b'\t' | b':' | b')')
+            {
+                end += 1;
+            }
+            let path = &stripped[start..end];
+            let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+            if segments.len() > 2 {
+                normalized.push_str(".../");
+                normalized.push_str(&segments[segments.len() - 2..].join("/"));
+            } else {
+                normalized.push_str(path);
+            }
+            i = end;
+        } else {
+            normalized.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+
+    // Normalize line numbers like :123: to :_:
+    let mut result = String::with_capacity(normalized.len());
+    let mut chars = normalized.chars().peekable();
+    while let Some(c) = chars.next() {
+        result.push(c);
+        if c == ':' {
+            // Check if followed by digits then ':'
+            let mut digits = String::new();
+            while let Some(&d) = chars.peek() {
+                if d.is_ascii_digit() {
+                    digits.push(d);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if !digits.is_empty() && chars.peek() == Some(&':') {
+                result.push('_');
+                result.push(':');
+                chars.next(); // consume the trailing ':'
+            } else {
+                result.push_str(&digits);
+            }
+        }
+    }
+
+    // Truncate to 200 chars
+    result.chars().take(200).collect()
+}
+
+/// Detect 3+ consecutive Bash calls that produce the same error output.
+pub fn detect_same_error_retries(entries: &[SessionEntry]) -> Vec<BashRetry> {
+    // Step 1: Walk assistant entries to build a map of tool_use_id → (command, turn_index)
+    let mut tool_commands: HashMap<String, (String, usize)> = HashMap::new();
+    let mut turn_index = 0;
+
+    for entry in entries {
+        if let SessionEntry::Assistant(assistant) = entry {
+            if let Some(content) = &assistant.message.content {
+                for block in content {
+                    if let ContentBlock::ToolUse { id, name, input } = block {
+                        if name == "Bash" {
+                            if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                                tool_commands.insert(
+                                    id.clone(),
+                                    (cmd.chars().take(500).collect(), turn_index),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            turn_index += 1;
+        }
+    }
+
+    // Step 2: Walk user entries to find tool_result blocks with is_error == true
+    struct ErrorResult {
+        command: String,
+        normalized_error: String,
+        turn_index: usize,
+    }
+
+    let mut error_results: Vec<ErrorResult> = Vec::new();
+
+    for entry in entries {
+        if let SessionEntry::User(user) = entry {
+            if let Some(content) = &user.message.content {
+                // Content can be an array of tool_result objects
+                if let Some(arr) = content.as_array() {
+                    for item in arr {
+                        let is_error = item
+                            .get("is_error")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if !is_error {
+                            continue;
+                        }
+
+                        let tool_use_id = match item.get("tool_use_id").and_then(|v| v.as_str()) {
+                            Some(id) => id,
+                            None => continue,
+                        };
+
+                        let error_content = item
+                            .get("content")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+
+                        if let Some((cmd, tidx)) = tool_commands.get(tool_use_id) {
+                            error_results.push(ErrorResult {
+                                command: cmd.clone(),
+                                normalized_error: normalize_error(error_content),
+                                turn_index: *tidx,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by turn_index
+    error_results.sort_by_key(|e| e.turn_index);
+
+    // Step 3: Detect 3+ consecutive same-error streaks
+    let mut retries = Vec::new();
+    let mut streak_start: Option<usize> = None;
+    let mut streak_len = 0;
+    let mut streak_error: Option<&str> = None;
+    let mut streak_cmd: Option<&str> = None;
+
+    for (i, er) in error_results.iter().enumerate() {
+        let continues = match streak_error {
+            Some(prev) => prev == er.normalized_error,
+            None => false,
+        };
+
+        if continues {
+            streak_len += 1;
+        } else {
+            if streak_len >= 3 {
+                retries.push(BashRetry {
+                    pattern: BashRetryPattern::SameError {
+                        command: streak_cmd.unwrap_or("").to_string(),
+                        error_snippet: streak_error.unwrap_or("").to_string(),
+                    },
+                    start_turn: error_results[streak_start.unwrap()].turn_index,
+                    length: streak_len,
+                });
+            }
+            streak_start = Some(i);
+            streak_len = 1;
+            streak_error = Some(&er.normalized_error);
+            streak_cmd = Some(&er.command);
+        }
+    }
+
+    // Flush trailing streak
+    if streak_len >= 3 {
+        retries.push(BashRetry {
+            pattern: BashRetryPattern::SameError {
+                command: streak_cmd.unwrap_or("").to_string(),
+                error_snippet: streak_error.unwrap_or("").to_string(),
+            },
+            start_turn: error_results[streak_start.unwrap()].turn_index,
+            length: streak_len,
+        });
+    }
+
+    retries
+}
+
 /// Build plain-english recommendation strings from flagged patterns.
 pub fn generate_recommendations(
     cache: &CacheStability,
     growth: &ContextGrowth,
     tools: &ToolPatterns,
+    same_error_retries: Option<&[BashRetry]>,
 ) -> Vec<String> {
     let mut recs = Vec::new();
 
@@ -351,6 +645,22 @@ pub fn generate_recommendations(
         ));
     }
 
+    if !tools.bash_retries.is_empty() {
+        recs.push(format!(
+            "{} identical command retry sequence(s) detected. The agent re-ran the same command without changing its approach.",
+            tools.bash_retries.len()
+        ));
+    }
+
+    if let Some(error_retries) = same_error_retries {
+        if !error_retries.is_empty() {
+            recs.push(format!(
+                "{} same-error retry sequence(s) detected. The agent got the same error repeatedly without adapting. Add troubleshooting steps to CLAUDE.md.",
+                error_retries.len()
+            ));
+        }
+    }
+
     if tools.exploration_flagged {
         recs.push(format!(
             "Read:Edit ratio is {:.0}:1. Add a project map to CLAUDE.md listing key source files.",
@@ -370,16 +680,30 @@ pub fn generate_recommendations(
 
 /// Run all diagnostic analyses on a session summary.
 pub fn run_diagnose(summary: &SessionSummary) -> DiagnoseData {
+    run_diagnose_with_entries(summary, None)
+}
+
+/// Run all diagnostic analyses, optionally with entry-level same-error detection.
+pub fn run_diagnose_with_entries(
+    summary: &SessionSummary,
+    entries: Option<&[SessionEntry]>,
+) -> DiagnoseData {
     let cache_stability = analyze_cache_stability(&summary.turns);
     let context_growth = analyze_context_growth(&summary.turns);
     let tool_patterns = analyze_tool_patterns(&summary.turns);
-    let recommendations =
-        generate_recommendations(&cache_stability, &context_growth, &tool_patterns);
+    let same_error_retries = entries.map(detect_same_error_retries);
+    let recommendations = generate_recommendations(
+        &cache_stability,
+        &context_growth,
+        &tool_patterns,
+        same_error_retries.as_deref(),
+    );
 
     DiagnoseData {
         cache_stability,
         context_growth,
         tool_patterns,
+        same_error_retries,
         recommendations,
     }
 }
@@ -396,6 +720,7 @@ pub fn compute_project_benchmark(project: &str, summaries: &[SessionSummary]) ->
             avg_cache_hit: 0.0,
             dominant_classification: CacheClassification::Stable,
             bash_loop_count: 0,
+            bash_retry_count: 0,
             exploration_count: 0,
             efficiency_score: 0.0,
         };
@@ -405,6 +730,7 @@ pub fn compute_project_benchmark(project: &str, summaries: &[SessionSummary]) ->
     let mut total_cache_hit: f64 = 0.0;
     let mut classifications: HashMap<String, usize> = HashMap::new();
     let mut bash_loop_total = 0;
+    let mut bash_retry_total = 0;
     let mut exploration_total = 0;
 
     for summary in summaries {
@@ -422,6 +748,7 @@ pub fn compute_project_benchmark(project: &str, summaries: &[SessionSummary]) ->
         *classifications.entry(class_key.to_string()).or_default() += 1;
 
         bash_loop_total += diag.tool_patterns.bash_loops.len();
+        bash_retry_total += diag.tool_patterns.bash_retries.len();
         if diag.tool_patterns.exploration_flagged {
             exploration_total += 1;
         }
@@ -454,6 +781,7 @@ pub fn compute_project_benchmark(project: &str, summaries: &[SessionSummary]) ->
         avg_cache_hit,
         dominant_classification,
         bash_loop_count: bash_loop_total,
+        bash_retry_count: bash_retry_total,
         exploration_count: exploration_total,
         efficiency_score: score,
     }
@@ -660,20 +988,25 @@ pub fn run(claude_dir: &Path, config: &Config, args: &DiagnoseArgs) -> Result<()
 
     // If an identifier is given, run single-session mode
     if let Some(ref id) = args.identifier {
-        let summary = resolve_session(&filtered, id, args.verbose)?;
-        return run_single_session(config, args, &summary);
+        let (summary, entries) = resolve_session(&filtered, id, args.verbose)?;
+        return run_single_session(config, args, &summary, &entries);
     }
 
     // No identifier: project-level overview
     run_project_level(claude_dir, config, args, &filtered)
 }
 
-fn run_single_session(config: &Config, args: &DiagnoseArgs, summary: &SessionSummary) -> Result<()> {
+fn run_single_session(
+    config: &Config,
+    args: &DiagnoseArgs,
+    summary: &SessionSummary,
+    entries: &[SessionEntry],
+) -> Result<()> {
     let pricing = lookup_pricing(config, summary.model.as_deref());
     let cost = calculate_usage_cost(&summary.total_usage, &pricing);
     let hit = cache_hit_ratio(&summary.total_usage);
 
-    let diag = run_diagnose(summary);
+    let diag = run_diagnose_with_entries(summary, Some(entries));
 
     if args.json {
         render_json(summary, &diag, &cost, hit, args.show_cost);
@@ -794,7 +1127,7 @@ fn resolve_session(
     session_files: &[&session_index::SessionFile],
     identifier: &str,
     verbose: bool,
-) -> Result<SessionSummary> {
+) -> Result<(SessionSummary, Vec<SessionEntry>)> {
     // Try UUID prefix match
     if let Some(sf) = session_files
         .iter()
@@ -802,16 +1135,17 @@ fn resolve_session(
     {
         let project_path = decode_project_path(&sf.project_dir_name);
         let entries = reader::parse_session_file(&sf.path, verbose)?;
-        return Ok(reader::summarize_session(
+        let summary = reader::summarize_session(
             &entries,
             sf.session_id.clone(),
             project_path,
-        ));
+        );
+        return Ok((summary, entries));
     }
 
     // Try slug match
     let id_lower = identifier.to_lowercase();
-    let mut best: Option<SessionSummary> = None;
+    let mut best: Option<(SessionSummary, Vec<SessionEntry>)> = None;
 
     for sf in session_files {
         let project_path = decode_project_path(&sf.project_dir_name);
@@ -832,7 +1166,7 @@ fn resolve_session(
 
         let is_newer = match (&best, summary.start_time) {
             (None, _) => true,
-            (Some(prev), Some(new_start)) => match prev.start_time {
+            (Some((prev, _)), Some(new_start)) => match prev.start_time {
                 Some(prev_start) => new_start > prev_start,
                 None => true,
             },
@@ -840,7 +1174,7 @@ fn resolve_session(
         };
 
         if is_newer {
-            best = Some(summary);
+            best = Some((summary, entries));
         }
     }
 
@@ -944,9 +1278,16 @@ fn render_text(
     }
 
     // Tool Patterns
+    let has_same_error = diag
+        .same_error_retries
+        .as_ref()
+        .is_some_and(|v| !v.is_empty());
+
     println!();
     println!(" ── Tool Patterns ─────────────────────────────────────────");
     if diag.tool_patterns.bash_loops.is_empty()
+        && diag.tool_patterns.bash_retries.is_empty()
+        && !has_same_error
         && !diag.tool_patterns.exploration_flagged
         && !diag.tool_patterns.subagent_flagged
     {
@@ -964,6 +1305,55 @@ fn render_text(
                 },
                 total_turns
             );
+        }
+        if !diag.tool_patterns.bash_retries.is_empty() {
+            let total_turns: usize = diag
+                .tool_patterns
+                .bash_retries
+                .iter()
+                .map(|r| r.length)
+                .sum();
+            println!(
+                " [!] Identical command retries: {} sequence{} ({} turns)",
+                diag.tool_patterns.bash_retries.len(),
+                if diag.tool_patterns.bash_retries.len() > 1 {
+                    "s"
+                } else {
+                    ""
+                },
+                total_turns
+            );
+            for retry in &diag.tool_patterns.bash_retries {
+                if let BashRetryPattern::IdenticalCommand { ref command } = retry.pattern {
+                    let display_cmd: String = command.chars().take(60).collect();
+                    println!(
+                        "     Turn {}-{}: `{}` ({}x)",
+                        retry.start_turn,
+                        retry.start_turn + retry.length - 1,
+                        display_cmd,
+                        retry.length
+                    );
+                }
+            }
+        }
+        if let Some(ref error_retries) = diag.same_error_retries {
+            if !error_retries.is_empty() {
+                let total_turns: usize = error_retries.iter().map(|r| r.length).sum();
+                println!(
+                    " [!] Same-error retries: {} sequence{} ({} turns)",
+                    error_retries.len(),
+                    if error_retries.len() > 1 { "s" } else { "" },
+                    total_turns
+                );
+                for retry in error_retries {
+                    println!(
+                        "     Turn {}-{}: same error repeated {}x",
+                        retry.start_turn,
+                        retry.start_turn + retry.length - 1,
+                        retry.length
+                    );
+                }
+            }
         }
         if diag.tool_patterns.exploration_flagged {
             println!(
@@ -992,6 +1382,28 @@ fn render_text(
 }
 
 // ── JSON rendering ────────────────────────────────────────────────
+
+fn bash_retry_to_json(retry: &BashRetry) -> BashRetryJson {
+    match &retry.pattern {
+        BashRetryPattern::IdenticalCommand { command } => BashRetryJson {
+            pattern: "identical_command".to_string(),
+            command: Some(command.clone()),
+            error_snippet: None,
+            start_turn: retry.start_turn,
+            length: retry.length,
+        },
+        BashRetryPattern::SameError {
+            command,
+            error_snippet,
+        } => BashRetryJson {
+            pattern: "same_error".to_string(),
+            command: Some(command.clone()),
+            error_snippet: Some(error_snippet.clone()),
+            start_turn: retry.start_turn,
+            length: retry.length,
+        },
+    }
+}
 
 fn render_json(
     summary: &SessionSummary,
@@ -1030,11 +1442,20 @@ fn render_json(
                     length: l.length,
                 })
                 .collect(),
+            bash_retries: diag
+                .tool_patterns
+                .bash_retries
+                .iter()
+                .map(bash_retry_to_json)
+                .collect(),
             read_edit_ratio: diag.tool_patterns.read_edit_ratio,
             exploration_flagged: diag.tool_patterns.exploration_flagged,
             subagent_count: diag.tool_patterns.subagent_count,
             subagent_flagged: diag.tool_patterns.subagent_flagged,
         },
+        same_error_retries: diag.same_error_retries.as_ref().map(|retries| {
+            retries.iter().map(bash_retry_to_json).collect()
+        }),
         recommendations: diag.recommendations.clone(),
     };
 
@@ -1182,6 +1603,7 @@ fn render_project_json(data: &ProjectDiagnoseData, days: u64) {
             avg_cache_hit: b.avg_cache_hit,
             dominant_classification: classification_str(&b.dominant_classification).to_string(),
             bash_loop_count: b.bash_loop_count,
+            bash_retry_count: b.bash_retry_count,
             exploration_count: b.exploration_count,
             efficiency_score: b.efficiency_score,
         })
@@ -1260,6 +1682,25 @@ mod tests {
             },
             tools: tools.into_iter().map(String::from).collect(),
             model: None,
+            bash_commands: Vec::new(),
+        }
+    }
+
+    fn make_turn_with_bash(index: usize, tools: Vec<&str>, commands: Vec<&str>) -> TurnSummary {
+        TurnSummary {
+            index,
+            timestamp: None,
+            usage: TokenUsage {
+                input_tokens: 100,
+                cache_creation_input_tokens: 0,
+                cache_read_input_tokens: 0,
+                output_tokens: 50,
+                cache_creation: None,
+                service_tier: None,
+            },
+            tools: tools.into_iter().map(String::from).collect(),
+            model: None,
+            bash_commands: commands.into_iter().map(String::from).collect(),
         }
     }
 
@@ -1457,21 +1898,39 @@ mod tests {
                 start_turn: 5,
                 length: 4,
             }],
+            bash_retries: vec![BashRetry {
+                pattern: BashRetryPattern::IdenticalCommand {
+                    command: "cargo test".to_string(),
+                },
+                start_turn: 5,
+                length: 4,
+            }],
             read_edit_ratio: 8.0,
             exploration_flagged: true,
             subagent_count: 5,
             subagent_flagged: true,
         };
 
-        let recs = generate_recommendations(&cache, &growth, &tools);
+        let same_error = vec![BashRetry {
+            pattern: BashRetryPattern::SameError {
+                command: "pulumi up".to_string(),
+                error_snippet: "no Pulumi.yaml".to_string(),
+            },
+            start_turn: 10,
+            length: 3,
+        }];
 
-        // Should have recommendations for: churning, growth, bash loops, exploration, subagents
-        assert_eq!(recs.len(), 5);
+        let recs = generate_recommendations(&cache, &growth, &tools, Some(&same_error));
+
+        // Should have recommendations for: churning, growth, bash loops, identical retries, same-error, exploration, subagents
+        assert_eq!(recs.len(), 7);
         assert!(recs[0].contains("30%"));
         assert!(recs[1].contains("3.0x"));
         assert!(recs[2].contains("Bash"));
-        assert!(recs[3].contains("Read:Edit"));
-        assert!(recs[4].contains("Task"));
+        assert!(recs[3].contains("identical command"));
+        assert!(recs[4].contains("same-error"));
+        assert!(recs[5].contains("Read:Edit"));
+        assert!(recs[6].contains("Task"));
     }
 
     // ── Project-level analysis tests ──────────────────────────────
@@ -1560,6 +2019,7 @@ mod tests {
                 avg_cache_hit: 0.3,
                 dominant_classification: CacheClassification::Churning,
                 bash_loop_count: 5,
+                bash_retry_count: 0,
                 exploration_count: 2,
                 efficiency_score: 0.2,
             },
@@ -1570,6 +2030,7 @@ mod tests {
                 avg_cache_hit: 0.95,
                 dominant_classification: CacheClassification::Stable,
                 bash_loop_count: 0,
+                bash_retry_count: 0,
                 exploration_count: 0,
                 efficiency_score: 0.95,
             },
@@ -1580,6 +2041,7 @@ mod tests {
                 avg_cache_hit: 0.7,
                 dominant_classification: CacheClassification::Stable,
                 bash_loop_count: 1,
+                bash_retry_count: 0,
                 exploration_count: 0,
                 efficiency_score: 0.7,
             },
@@ -1662,6 +2124,7 @@ mod tests {
                 avg_cache_hit: 0.5,
                 dominant_classification: CacheClassification::Churning,
                 bash_loop_count: 0,
+                bash_retry_count: 0,
                 exploration_count: 0,
                 efficiency_score: 0.4,
             },
@@ -1670,5 +2133,221 @@ mod tests {
         let recs = generate_project_recommendations(&benchmarks, 0.85);
         assert!(!recs.is_empty());
         assert!(recs.iter().any(|r| r.contains("bad-project")));
+    }
+
+    // ── Identical command retry tests ─────────────────────────────
+
+    #[test]
+    fn test_identical_command_3x_detected() {
+        let turns = vec![
+            make_turn_with_bash(0, vec!["Read"], vec![]),
+            make_turn_with_bash(1, vec!["Bash"], vec!["cargo test"]),
+            make_turn_with_bash(2, vec!["Bash"], vec!["cargo test"]),
+            make_turn_with_bash(3, vec!["Bash"], vec!["cargo test"]),
+            make_turn_with_bash(4, vec!["Edit"], vec![]),
+        ];
+
+        let result = detect_identical_command_retries(&turns);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].start_turn, 1);
+        assert_eq!(result[0].length, 3);
+        if let BashRetryPattern::IdenticalCommand { ref command } = result[0].pattern {
+            assert_eq!(command, "cargo test");
+        } else {
+            panic!("expected IdenticalCommand pattern");
+        }
+    }
+
+    #[test]
+    fn test_identical_command_different_commands_not_triggered() {
+        let turns = vec![
+            make_turn_with_bash(0, vec!["Bash"], vec!["cargo test"]),
+            make_turn_with_bash(1, vec!["Bash"], vec!["cargo build"]),
+            make_turn_with_bash(2, vec!["Bash"], vec!["cargo check"]),
+        ];
+
+        let result = detect_identical_command_retries(&turns);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_identical_command_multi_bash_uses_first() {
+        // Multi-bash turns: first command is used for comparison
+        let turns = vec![
+            make_turn_with_bash(0, vec!["Bash", "Bash"], vec!["cargo test", "echo done"]),
+            make_turn_with_bash(1, vec!["Bash", "Bash"], vec!["cargo test", "echo other"]),
+            make_turn_with_bash(2, vec!["Bash"], vec!["cargo test"]),
+        ];
+
+        let result = detect_identical_command_retries(&turns);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].length, 3);
+    }
+
+    #[test]
+    fn test_identical_command_non_bash_breaks_streak() {
+        let turns = vec![
+            make_turn_with_bash(0, vec!["Bash"], vec!["cargo test"]),
+            make_turn_with_bash(1, vec!["Bash"], vec!["cargo test"]),
+            make_turn_with_bash(2, vec!["Read"], vec![]), // no bash commands
+            make_turn_with_bash(3, vec!["Bash"], vec!["cargo test"]),
+        ];
+
+        let result = detect_identical_command_retries(&turns);
+        assert!(result.is_empty()); // no streak >= 3
+    }
+
+    #[test]
+    fn test_identical_command_empty_bash_commands_ignored() {
+        let turns = vec![
+            make_turn_with_bash(0, vec!["Bash"], vec![]),
+            make_turn_with_bash(1, vec!["Bash"], vec![]),
+            make_turn_with_bash(2, vec!["Bash"], vec![]),
+        ];
+
+        let result = detect_identical_command_retries(&turns);
+        assert!(result.is_empty());
+    }
+
+    // ── Error normalization tests ─────────────────────────────────
+
+    #[test]
+    fn test_strip_ansi() {
+        assert_eq!(strip_ansi("\x1b[31merror\x1b[0m"), "error");
+        assert_eq!(strip_ansi("no escapes"), "no escapes");
+        assert_eq!(strip_ansi("\x1b[1;31mbold red\x1b[0m"), "bold red");
+    }
+
+    #[test]
+    fn test_normalize_error_path_shortening() {
+        let input = "error in /Users/foo/bar/baz/src/main.rs";
+        let normalized = normalize_error(input);
+        assert!(normalized.contains(".../src/main.rs"));
+        assert!(!normalized.contains("/Users/foo/bar/baz"));
+    }
+
+    #[test]
+    fn test_normalize_error_line_numbers() {
+        let input = "error at file.rs:42: something failed";
+        let normalized = normalize_error(input);
+        assert!(normalized.contains("file.rs:_:"));
+        assert!(!normalized.contains(":42:"));
+    }
+
+    #[test]
+    fn test_normalize_error_truncation() {
+        let long_error = "x".repeat(300);
+        let normalized = normalize_error(&long_error);
+        assert_eq!(normalized.len(), 200);
+    }
+
+    // ── Same-error retry tests ────────────────────────────────────
+
+    fn make_assistant_entry(tool_use_id: &str, command: &str) -> SessionEntry {
+        use crate::parser::types::{AssistantEntry, AssistantMessage, CommonFields};
+        SessionEntry::Assistant(AssistantEntry {
+            common: CommonFields {
+                uuid: None,
+                session_id: None,
+                timestamp: None,
+                parent_uuid: None,
+                cwd: None,
+                version: None,
+                git_branch: None,
+                slug: None,
+                is_sidechain: None,
+            },
+            message: AssistantMessage {
+                model: Some("test-model".to_string()),
+                id: None,
+                role: Some("assistant".to_string()),
+                content: Some(vec![ContentBlock::ToolUse {
+                    id: tool_use_id.to_string(),
+                    name: "Bash".to_string(),
+                    input: serde_json::json!({"command": command}),
+                }]),
+                stop_reason: None,
+                usage: Some(TokenUsage::default()),
+            },
+            request_id: None,
+        })
+    }
+
+    fn make_user_entry(tool_use_id: &str, error_content: &str, is_error: bool) -> SessionEntry {
+        use crate::parser::types::{CommonFields, UserEntry, UserMessage};
+        SessionEntry::User(UserEntry {
+            common: CommonFields {
+                uuid: None,
+                session_id: None,
+                timestamp: None,
+                parent_uuid: None,
+                cwd: None,
+                version: None,
+                git_branch: None,
+                slug: None,
+                is_sidechain: None,
+            },
+            message: UserMessage {
+                role: Some("user".to_string()),
+                content: Some(serde_json::json!([{
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": error_content,
+                    "is_error": is_error
+                }])),
+            },
+            tool_use_result: None,
+        })
+    }
+
+    #[test]
+    fn test_same_error_3x_detected() {
+        let entries = vec![
+            make_assistant_entry("t1", "pulumi up"),
+            make_user_entry("t1", "error: no Pulumi.yaml found", true),
+            make_assistant_entry("t2", "pulumi up"),
+            make_user_entry("t2", "error: no Pulumi.yaml found", true),
+            make_assistant_entry("t3", "pulumi up"),
+            make_user_entry("t3", "error: no Pulumi.yaml found", true),
+        ];
+
+        let result = detect_same_error_retries(&entries);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].length, 3);
+        if let BashRetryPattern::SameError { ref command, .. } = result[0].pattern {
+            assert_eq!(command, "pulumi up");
+        } else {
+            panic!("expected SameError pattern");
+        }
+    }
+
+    #[test]
+    fn test_same_error_different_errors_not_triggered() {
+        let entries = vec![
+            make_assistant_entry("t1", "cargo test"),
+            make_user_entry("t1", "error: cannot find module 'foo'", true),
+            make_assistant_entry("t2", "cargo test"),
+            make_user_entry("t2", "error: type mismatch in bar", true),
+            make_assistant_entry("t3", "cargo test"),
+            make_user_entry("t3", "error: unused variable 'x'", true),
+        ];
+
+        let result = detect_same_error_retries(&entries);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_same_error_non_error_results_ignored() {
+        let entries = vec![
+            make_assistant_entry("t1", "ls"),
+            make_user_entry("t1", "file1.txt\nfile2.txt", false),
+            make_assistant_entry("t2", "ls"),
+            make_user_entry("t2", "file1.txt\nfile2.txt", false),
+            make_assistant_entry("t3", "ls"),
+            make_user_entry("t3", "file1.txt\nfile2.txt", false),
+        ];
+
+        let result = detect_same_error_retries(&entries);
+        assert!(result.is_empty());
     }
 }

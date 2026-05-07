@@ -303,6 +303,8 @@ pub struct DiagnoseJson {
     pub cache_stability: CacheStabilityJson,
     pub context_growth: ContextGrowthJson,
     pub tool_patterns: ToolPatternsJson,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_error_retries: Option<Vec<BashRetryJson>>,
     pub recommendations: Vec<String>,
 }
 
@@ -325,6 +327,7 @@ pub struct ContextGrowthJson {
 #[derive(Serialize, Clone)]
 pub struct ToolPatternsJson {
     pub bash_loops: Vec<BashLoopJson>,
+    pub bash_retries: Vec<BashRetryJson>,
     pub read_edit_ratio: f64,
     pub exploration_flagged: bool,
     pub subagent_count: usize,
@@ -333,6 +336,17 @@ pub struct ToolPatternsJson {
 
 #[derive(Serialize, Clone)]
 pub struct BashLoopJson {
+    pub start_turn: usize,
+    pub length: usize,
+}
+
+#[derive(Serialize, Clone)]
+pub struct BashRetryJson {
+    pub pattern: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_snippet: Option<String>,
     pub start_turn: usize,
     pub length: usize,
 }
@@ -361,6 +375,7 @@ pub struct ProjectBenchmarkJson {
     pub avg_cache_hit: f64,
     pub dominant_classification: String,
     pub bash_loop_count: usize,
+    pub bash_retry_count: usize,
     pub exploration_count: usize,
     pub efficiency_score: f64,
 }

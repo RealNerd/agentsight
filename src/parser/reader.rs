@@ -130,13 +130,21 @@ fn accumulate_assistant(
     summary.total_usage.cache_read_input_tokens += usage.cache_read_input_tokens;
     summary.total_usage.output_tokens += usage.output_tokens;
 
-    // Extract tool calls from content blocks
+    // Extract tool calls and bash commands from content blocks
     let mut tools = Vec::new();
+    let mut bash_commands = Vec::new();
     if let Some(content) = &assistant.message.content {
         for block in content {
-            if let ContentBlock::ToolUse { name, .. } = block {
+            if let ContentBlock::ToolUse { name, input, .. } = block {
                 tools.push(name.clone());
                 *summary.tool_calls.entry(name.clone()).or_insert(0) += 1;
+
+                if name == "Bash" {
+                    if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                        let truncated: String = cmd.chars().take(500).collect();
+                        bash_commands.push(truncated);
+                    }
+                }
             }
         }
     }
@@ -155,6 +163,7 @@ fn accumulate_assistant(
         usage,
         tools,
         model: turn_model,
+        bash_commands,
     });
 
     *turn_index += 1;

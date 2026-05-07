@@ -656,6 +656,7 @@ pub async fn get_diagnose(
                 avg_cache_hit: b.avg_cache_hit,
                 dominant_classification: class_str.to_string(),
                 bash_loop_count: b.bash_loop_count,
+                bash_retry_count: b.bash_retry_count,
                 exploration_count: b.exploration_count,
                 efficiency_score: b.efficiency_score,
             }

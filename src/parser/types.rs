@@ -213,4 +213,6 @@ pub struct TurnSummary {
     pub usage: TokenUsage,
     pub tools: Vec<String>,
     pub model: Option<String>,
+    /// The command strings from Bash tool_use blocks in this turn (truncated to 500 chars each).
+    pub bash_commands: Vec<String>,
 }
