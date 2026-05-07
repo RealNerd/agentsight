@@ -1,0 +1,3 @@
+{"type":"file-history-snapshot","messageId":"msg_001","snapshot":{"trackedFileBackups":{}},"isSnapshotUpdate":false}
+{"type":"system","cwd":"/project","uuid":"b0000000-0000-0000-0000-000000000001","sessionId":"00000000-0000-0000-0000-000000000002","timestamp":"2025-06-01T09:00:00Z","subtype":"init"}
+{"type":"file-history-snapshot","messageId":"msg_002","snapshot":{"trackedFileBackups":{}},"isSnapshotUpdate":true}

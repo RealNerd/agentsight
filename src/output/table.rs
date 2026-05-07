@@ -36,15 +36,8 @@ pub fn render_sessions_table(rows: &[SessionRow], show_cost: bool) {
             .unwrap_or_else(|| "—".to_string());
 
         let project = shorten_project(&summary.project_path);
-        let model = summary
-            .model
-            .as_deref()
-            .unwrap_or("unknown")
-            .to_string();
-        let slug = summary
-            .slug
-            .as_deref()
-            .unwrap_or(&summary.session_id[..8]);
+        let model = summary.model.as_deref().unwrap_or("unknown").to_string();
+        let slug = summary.slug.as_deref().unwrap_or(&summary.session_id[..8]);
 
         let tokens = format_tokens(summary.total_usage.total_tokens());
         let cache = format_percent(row.cache_hit);
@@ -146,7 +139,11 @@ pub fn render_session_detail(
             summary.total_usage.cache_read_input_tokens,
             cost.cache_read_cost,
         ),
-        ("Output", summary.total_usage.output_tokens, cost.output_cost),
+        (
+            "Output",
+            summary.total_usage.output_tokens,
+            cost.output_cost,
+        ),
     ];
 
     for (label, tokens, cost_val) in &rows {
@@ -196,9 +193,7 @@ pub fn render_session_detail(
         println!(
             "  Tokens from cache:  {} / {} input",
             format_tokens(cache_read),
-            format_tokens(
-                summary.total_usage.input_tokens + cache_write + cache_read
-            )
+            format_tokens(summary.total_usage.input_tokens + cache_write + cache_read)
         );
     }
     println!();
@@ -229,7 +224,10 @@ pub fn render_timeline(
     // Format the header date
     let date_label = axis_start.format("%b %-d, %Y").to_string();
     println!();
-    println!(" ── Timeline: {} ──────────────────────────────────────", date_label);
+    println!(
+        " ── Timeline: {} ──────────────────────────────────────",
+        date_label
+    );
     println!();
 
     // Build time axis labels
@@ -266,10 +264,7 @@ pub fn render_timeline(
     let mut by_project: std::collections::HashMap<String, Vec<&TimelineSession>> =
         std::collections::HashMap::new();
     for s in sessions {
-        by_project
-            .entry(s.project.clone())
-            .or_default()
-            .push(s);
+        by_project.entry(s.project.clone()).or_default().push(s);
         if !project_order.contains(&s.project) {
             project_order.push(s.project.clone());
         }

@@ -118,10 +118,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SessionsArgs) -> Result<()
     Ok(())
 }
 
-fn lookup_pricing(
-    config: &Config,
-    summary: &SessionSummary,
-) -> crate::config::ModelPricing {
+fn lookup_pricing(config: &Config, summary: &SessionSummary) -> crate::config::ModelPricing {
     let model_name = summary.model.as_deref().unwrap_or("claude-opus-4-6");
     config
         .pricing_for_model(model_name)

@@ -1,10 +1,5 @@
-mod commands;
-mod config;
-mod cost;
-mod output;
-mod parser;
-mod server;
-mod skills;
+use agentsight::commands;
+use agentsight::config;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -136,6 +131,20 @@ enum Commands {
         /// Don't open browser automatically
         #[arg(long)]
         no_open: bool,
+    },
+
+    /// Sanitize a session JSONL file for use as a test fixture
+    Sanitize {
+        /// Session slug, UUID prefix, or path to .jsonl file
+        identifier: String,
+
+        /// Output file path (default: stdout)
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+
+        /// Maximum number of lines to output (0 = all)
+        #[arg(long, default_value_t = 0)]
+        max_lines: usize,
     },
 
     /// Install AgentSight skills as Claude Code slash commands
@@ -272,6 +281,19 @@ fn main() -> Result<()> {
                 port,
                 no_open,
                 show_cost,
+            },
+        ),
+        Commands::Sanitize {
+            identifier,
+            output,
+            max_lines,
+        } => commands::sanitize::run(
+            &claude_dir,
+            &commands::sanitize::SanitizeArgs {
+                identifier,
+                output,
+                max_lines,
+                verbose: cli.verbose,
             },
         ),
         Commands::InstallSkill { name, list, force } => {

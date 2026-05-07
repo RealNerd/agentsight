@@ -3,13 +3,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::Config;
-use crate::cost::calculator::cache_hit_ratio;
 use crate::cost::calculate_usage_cost;
+use crate::cost::calculator::cache_hit_ratio;
 use crate::output;
 use crate::output::json::{
-    BashLoopJson, BashRetryJson, CacheStabilityJson, ClaudeMdJson, ContextGrowthJson,
-    DiagnoseJson, ProjectBenchmarkJson, ProjectDiagnoseJson, ProjectTrendJson, ToolPatternsJson,
-    TrendPointJson,
+    BashLoopJson, BashRetryJson, CacheStabilityJson, ClaudeMdJson, ContextGrowthJson, DiagnoseJson,
+    ProjectBenchmarkJson, ProjectDiagnoseJson, ProjectTrendJson, ToolPatternsJson, TrendPointJson,
 };
 use crate::output::table::shorten_project;
 use crate::parser::reader::{self, decode_project_path};
@@ -71,8 +70,13 @@ pub struct BashLoop {
 
 #[derive(Debug, Clone)]
 pub enum BashRetryPattern {
-    IdenticalCommand { command: String },
-    SameError { command: String, error_snippet: String },
+    IdenticalCommand {
+        command: String,
+    },
+    SameError {
+        command: String,
+        error_snippet: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -267,8 +271,7 @@ pub fn analyze_tool_patterns(turns: &[TurnSummary]) -> ToolPatterns {
     let mut streak_len = 0;
 
     for (i, turn) in turns.iter().enumerate() {
-        let is_bash_only =
-            !turn.tools.is_empty() && turn.tools.iter().all(|t| t == "Bash");
+        let is_bash_only = !turn.tools.is_empty() && turn.tools.iter().all(|t| t == "Bash");
 
         if is_bash_only {
             if streak_start.is_none() {
@@ -430,9 +433,7 @@ fn normalize_error(s: &str) -> String {
             // Found start of a path — collect the whole path
             let start = i;
             let mut end = i + 1;
-            while end < bytes.len()
-                && !matches!(bytes[end], b' ' | b'\n' | b'\t' | b':' | b')')
-            {
+            while end < bytes.len() && !matches!(bytes[end], b' ' | b'\n' | b'\t' | b':' | b')') {
                 end += 1;
             }
             let path = &stripped[start..end];
@@ -534,10 +535,8 @@ pub fn detect_same_error_retries(entries: &[SessionEntry]) -> Vec<BashRetry> {
                             None => continue,
                         };
 
-                        let error_content = item
-                            .get("content")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
+                        let error_content =
+                            item.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
                         if let Some((cmd, tidx)) = tool_commands.get(tool_use_id) {
                             error_results.push(ErrorResult {
@@ -891,10 +890,7 @@ pub fn find_claude_md(decoded_project_path: &str) -> Option<PathBuf> {
 }
 
 /// Analyze a CLAUDE.md file for a project.
-pub fn analyze_claude_md(
-    decoded_project_path: &str,
-    include_content: bool,
-) -> ClaudeMdAnalysis {
+pub fn analyze_claude_md(decoded_project_path: &str, include_content: bool) -> ClaudeMdAnalysis {
     match find_claude_md(decoded_project_path) {
         None => ClaudeMdAnalysis {
             exists: false,
@@ -1135,11 +1131,7 @@ fn resolve_session(
     {
         let project_path = decode_project_path(&sf.project_dir_name);
         let entries = reader::parse_session_file(&sf.path, verbose)?;
-        let summary = reader::summarize_session(
-            &entries,
-            sf.session_id.clone(),
-            project_path,
-        );
+        let summary = reader::summarize_session(&entries, sf.session_id.clone(), project_path);
         return Ok((summary, entries));
     }
 
@@ -1203,10 +1195,7 @@ fn render_text(
     hit: f64,
     show_cost: bool,
 ) {
-    let slug_display = summary
-        .slug
-        .as_deref()
-        .unwrap_or(&summary.session_id[..8]);
+    let slug_display = summary.slug.as_deref().unwrap_or(&summary.session_id[..8]);
     let duration = match (summary.start_time, summary.end_time) {
         (Some(start), Some(end)) => {
             let dur = end - start;
@@ -1453,9 +1442,10 @@ fn render_json(
             subagent_count: diag.tool_patterns.subagent_count,
             subagent_flagged: diag.tool_patterns.subagent_flagged,
         },
-        same_error_retries: diag.same_error_retries.as_ref().map(|retries| {
-            retries.iter().map(bash_retry_to_json).collect()
-        }),
+        same_error_retries: diag
+            .same_error_retries
+            .as_ref()
+            .map(|retries| retries.iter().map(bash_retry_to_json).collect()),
         recommendations: diag.recommendations.clone(),
     };
 
@@ -1668,7 +1658,14 @@ mod tests {
     use super::*;
     use crate::parser::types::TokenUsage;
 
-    fn make_turn(index: usize, input: u64, cache_creation: u64, cache_read: u64, output: u64, tools: Vec<&str>) -> TurnSummary {
+    fn make_turn(
+        index: usize,
+        input: u64,
+        cache_creation: u64,
+        cache_read: u64,
+        output: u64,
+        tools: Vec<&str>,
+    ) -> TurnSummary {
         TurnSummary {
             index,
             timestamp: None,
@@ -1935,7 +1932,12 @@ mod tests {
 
     // ── Project-level analysis tests ──────────────────────────────
 
-    fn make_session_summary(id: &str, project: &str, cache_read_pct: f64, turns_count: usize) -> SessionSummary {
+    fn make_session_summary(
+        id: &str,
+        project: &str,
+        cache_read_pct: f64,
+        turns_count: usize,
+    ) -> SessionSummary {
         // cache_read_pct is 0.0-1.0 fraction of input that comes from cache reads
         let total_input = 100_000u64;
         let cache_read = (total_input as f64 * cache_read_pct) as u64;
@@ -1946,9 +1948,23 @@ mod tests {
                 let per_turn_input = input / turns_count as u64;
                 let per_turn_cache = cache_read / turns_count as u64;
                 if i < 3 {
-                    make_turn(i, per_turn_input, 500, per_turn_cache, 100, vec!["Read", "Edit"])
+                    make_turn(
+                        i,
+                        per_turn_input,
+                        500,
+                        per_turn_cache,
+                        100,
+                        vec!["Read", "Edit"],
+                    )
                 } else {
-                    make_turn(i, per_turn_input, 50, per_turn_cache, 100, vec!["Read", "Edit"])
+                    make_turn(
+                        i,
+                        per_turn_input,
+                        50,
+                        per_turn_cache,
+                        100,
+                        vec!["Read", "Edit"],
+                    )
                 }
             })
             .collect();
@@ -2072,7 +2088,12 @@ mod tests {
         let mut summaries: Vec<SessionSummary> = Vec::new();
         for i in 0..8 {
             let cache = if i < 3 { 0.50 } else { 0.92 };
-            summaries.push(make_session_summary(&format!("s{}", i), "/foo/bar", cache, 10));
+            summaries.push(make_session_summary(
+                &format!("s{}", i),
+                "/foo/bar",
+                cache,
+                10,
+            ));
         }
 
         let trend = analyze_project_trend(&summaries);
@@ -2085,7 +2106,12 @@ mod tests {
         let mut summaries: Vec<SessionSummary> = Vec::new();
         for i in 0..8 {
             let cache = if i < 3 { 0.92 } else { 0.50 };
-            summaries.push(make_session_summary(&format!("s{}", i), "/foo/bar", cache, 10));
+            summaries.push(make_session_summary(
+                &format!("s{}", i),
+                "/foo/bar",
+                cache,
+                10,
+            ));
         }
 
         let trend = analyze_project_trend(&summaries);
@@ -2116,19 +2142,17 @@ mod tests {
 
     #[test]
     fn test_project_recommendations_low_cache() {
-        let benchmarks = vec![
-            ProjectBenchmark {
-                project: "bad-project".to_string(),
-                session_count: 3,
-                avg_tokens_per_session: 100_000,
-                avg_cache_hit: 0.5,
-                dominant_classification: CacheClassification::Churning,
-                bash_loop_count: 0,
-                bash_retry_count: 0,
-                exploration_count: 0,
-                efficiency_score: 0.4,
-            },
-        ];
+        let benchmarks = vec![ProjectBenchmark {
+            project: "bad-project".to_string(),
+            session_count: 3,
+            avg_tokens_per_session: 100_000,
+            avg_cache_hit: 0.5,
+            dominant_classification: CacheClassification::Churning,
+            bash_loop_count: 0,
+            bash_retry_count: 0,
+            exploration_count: 0,
+            efficiency_score: 0.4,
+        }];
 
         let recs = generate_project_recommendations(&benchmarks, 0.85);
         assert!(!recs.is_empty());

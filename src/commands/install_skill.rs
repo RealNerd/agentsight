@@ -23,8 +23,12 @@ pub fn run(args: &InstallSkillArgs) -> Result<()> {
 
     match &args.name {
         Some(name) => {
-            let skill = skills::find_skill(name)
-                .ok_or_else(|| anyhow::anyhow!("Unknown skill '{}'. Use --list to see available skills.", name))?;
+            let skill = skills::find_skill(name).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unknown skill '{}'. Use --list to see available skills.",
+                    name
+                )
+            })?;
             install_one(skill, &dest_dir, args.force, args.json)?;
         }
         None => {
@@ -38,7 +42,8 @@ pub fn run(args: &InstallSkillArgs) -> Result<()> {
 }
 
 fn commands_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
     Ok(home.join(".claude").join("commands"))
 }
 
@@ -84,11 +89,7 @@ fn install_one(
             })
         );
     } else {
-        println!(
-            "Installed /{}  ->  {}",
-            skill.name,
-            dest.display()
-        );
+        println!("Installed /{}  ->  {}", skill.name, dest.display());
     }
 
     Ok(())

@@ -14,7 +14,6 @@ impl CostBreakdown {
     pub fn total(&self) -> f64 {
         self.input_cost + self.cache_creation_cost + self.cache_read_cost + self.output_cost
     }
-
 }
 
 impl std::ops::AddAssign for CostBreakdown {

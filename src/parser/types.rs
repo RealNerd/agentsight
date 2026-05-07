@@ -128,7 +128,6 @@ pub struct UserMessage {
     pub content: Option<serde_json::Value>,
 }
 
-
 // ── Progress entries ───────────────────────────────────────────────
 
 #[allow(dead_code)]

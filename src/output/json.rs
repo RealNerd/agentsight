@@ -145,10 +145,7 @@ pub fn print_watch_snapshot_json(
     };
 
     // NDJSON: one compact JSON object per line
-    println!(
-        "{}",
-        serde_json::to_string(&snapshot).unwrap_or_default()
-    );
+    println!("{}", serde_json::to_string(&snapshot).unwrap_or_default());
 }
 
 /// Print a list of sessions as JSON to stdout.

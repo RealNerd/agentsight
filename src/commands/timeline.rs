@@ -3,8 +3,8 @@ use chrono::{DateTime, Duration, Utc};
 use std::path::Path;
 
 use crate::config::Config;
-use crate::cost::calculator::cache_hit_ratio;
 use crate::cost::calculate_usage_cost;
+use crate::cost::calculator::cache_hit_ratio;
 use crate::output;
 use crate::output::json::{ConcurrencySlotJson, TimelineJson, TimelineSessionJson};
 use crate::output::table::shorten_project;
@@ -196,7 +196,10 @@ pub fn run(claude_dir: &Path, config: &Config, args: &TimelineArgs) -> Result<()
             let now = Utc::now();
             print_timeline_json(&[], &[], now, now, args.days);
         } else {
-            println!("No sessions with time data found in the last {} day(s).", args.days);
+            println!(
+                "No sessions with time data found in the last {} day(s).",
+                args.days
+            );
         }
         return Ok(());
     }
@@ -211,7 +214,14 @@ pub fn run(claude_dir: &Path, config: &Config, args: &TimelineArgs) -> Result<()
     if args.json {
         print_timeline_json(&sessions, &concurrency, axis_start, axis_end, args.days);
     } else {
-        output::table::render_timeline(&sessions, &concurrency, axis_start, axis_end, granularity, args.show_cost);
+        output::table::render_timeline(
+            &sessions,
+            &concurrency,
+            axis_start,
+            axis_end,
+            granularity,
+            args.show_cost,
+        );
 
         // Summary footer
         let peak = concurrency.iter().map(|s| s.count).max().unwrap_or(0);
@@ -331,10 +341,7 @@ mod tests {
         let tokens_per_turn = tokens / num_turns;
         let turn_activity: Vec<(DateTime<Utc>, u64)> = (0..num_turns)
             .map(|i| {
-                let t = start
-                    + Duration::minutes(
-                        (i as i64 * duration_min) / num_turns as i64,
-                    );
+                let t = start + Duration::minutes((i as i64 * duration_min) / num_turns as i64);
                 (t, tokens_per_turn)
             })
             .collect();
@@ -440,7 +447,11 @@ mod tests {
         assert_eq!(slots[2].tokens, 0);
         // Middle slots should all be 0
         for slot in &slots[3..15] {
-            assert_eq!(slot.tokens, 0, "idle slot at {} should have 0 tokens", slot.time);
+            assert_eq!(
+                slot.tokens, 0,
+                "idle slot at {} should have 0 tokens",
+                slot.time
+            );
         }
         // Slot at minute 480 (480-510): should have tokens from turns at 485 and 500
         let slot_480_idx = (480 / 30) as usize;

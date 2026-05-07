@@ -47,9 +47,7 @@ pub async fn list_sessions(
         .map(|arc| arc.as_ref())
         .filter(|cs| {
             // Date filter
-            cs.summary
-                .start_time
-                .is_some_and(|start| start >= cutoff)
+            cs.summary.start_time.is_some_and(|start| start >= cutoff)
         })
         .filter(|cs| {
             // Project filter
@@ -62,7 +60,9 @@ pub async fn list_sessions(
 
     // Sort
     match sort {
-        "tokens" => items.sort_by_key(|cs| std::cmp::Reverse(cs.summary.total_usage.total_tokens())),
+        "tokens" => {
+            items.sort_by_key(|cs| std::cmp::Reverse(cs.summary.total_usage.total_tokens()))
+        }
         "turns" => items.sort_by_key(|cs| std::cmp::Reverse(cs.summary.turns.len())),
         "cost" => items.sort_by(|a, b| {
             b.cost
@@ -181,11 +181,7 @@ pub async fn get_summary(
     let matching: Vec<&CachedSession> = all
         .iter()
         .map(|arc| arc.as_ref())
-        .filter(|cs| {
-            cs.summary
-                .start_time
-                .is_some_and(|start| start >= cutoff)
-        })
+        .filter(|cs| cs.summary.start_time.is_some_and(|start| start >= cutoff))
         .filter(|cs| match &query.project {
             Some(filter) => cs.project_path.contains(filter.as_str()),
             None => true,
@@ -314,13 +310,14 @@ pub async fn get_summary(
 
     let active_hours = by_hour.len() as u64;
     let avg_tokens_per_hour = total_tokens.checked_div(active_hours.max(1)).unwrap_or(0);
-    let peak_hour = by_hour
-        .iter()
-        .max_by_key(|(_, v)| *v)
-        .map(|(h, t)| crate::output::json::HourBurnJson {
-            hour: h.clone(),
-            tokens: *t,
-        });
+    let peak_hour =
+        by_hour
+            .iter()
+            .max_by_key(|(_, v)| *v)
+            .map(|(h, t)| crate::output::json::HourBurnJson {
+                hour: h.clone(),
+                tokens: *t,
+            });
 
     Ok(Json(SummaryJson {
         period_days: days,
@@ -352,9 +349,7 @@ pub async fn get_config(State(state): State<AppState>) -> Json<ConfigJson> {
     })
 }
 
-pub async fn list_projects(
-    State(state): State<AppState>,
-) -> Result<Json<Vec<String>>, StatusCode> {
+pub async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<String>>, StatusCode> {
     state.cache.refresh().await;
     Ok(Json(state.cache.get_projects().await))
 }

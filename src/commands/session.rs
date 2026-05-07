@@ -2,8 +2,8 @@ use anyhow::Result;
 use std::path::Path;
 
 use crate::config::Config;
-use crate::cost::calculator::cache_hit_ratio;
 use crate::cost::calculate_usage_cost;
+use crate::cost::calculator::cache_hit_ratio;
 use crate::output;
 use crate::parser::reader::{self, decode_project_path};
 use crate::parser::session_index;
@@ -57,8 +57,8 @@ fn find_by_slug(
     // Collect all sessions that match by slug (exact, then substring).
     // When multiple sessions share a slug (e.g. plan mode → implementation),
     // pick the most recent one.
-    use crate::parser::types::SessionSummary;
     use crate::cost::CostBreakdown;
+    use crate::parser::types::SessionSummary;
 
     let mut best: Option<(SessionSummary, CostBreakdown, f64)> = None;
     let slug_lower = slug.to_lowercase();

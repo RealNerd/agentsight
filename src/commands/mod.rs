@@ -1,6 +1,7 @@
 pub mod dashboard;
 pub mod diagnose;
 pub mod install_skill;
+pub mod sanitize;
 pub mod session;
 pub mod sessions;
 pub mod summary;

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use crate::config::Config;
-use crate::cost::calculator::cache_hit_ratio;
 use crate::cost::calculate_usage_cost;
+use crate::cost::calculator::cache_hit_ratio;
 use crate::output::table::{shorten_model, shorten_project};
 use crate::output::{format_cost, format_percent, format_tokens};
 use crate::parser::reader::{self, decode_project_path};
@@ -137,15 +137,14 @@ pub fn run(claude_dir: &Path, config: &Config, args: &WatchArgs) -> Result<()> {
                     );
 
                     let model_name = summary.model.as_deref().unwrap_or("claude-opus-4-6");
-                    let pricing = config
-                        .pricing_for_model(model_name)
-                        .cloned()
-                        .unwrap_or(crate::config::ModelPricing {
+                    let pricing = config.pricing_for_model(model_name).cloned().unwrap_or(
+                        crate::config::ModelPricing {
                             input_per_million: 5.0,
                             output_per_million: 25.0,
                             cache_creation_per_million: 6.25,
                             cache_read_per_million: 0.5,
-                        });
+                        },
+                    );
 
                     let cost = calculate_usage_cost(&summary.total_usage, &pricing);
                     let hit = cache_hit_ratio(&summary.total_usage);
@@ -330,11 +329,7 @@ pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
 }
 
 /// Render the table in-place, clearing previous output.
-fn render_table_inplace(
-    rows: &[WatchRow],
-    show_cost: bool,
-    prev_lines: &mut u16,
-) -> Result<()> {
+fn render_table_inplace(rows: &[WatchRow], show_cost: bool, prev_lines: &mut u16) -> Result<()> {
     let mut stdout = io::stdout();
 
     if *prev_lines > 0 {
@@ -516,11 +511,21 @@ mod tests {
         // Both ever_changed sessions appear, never-changed does not
         assert_eq!(rows.len(), 2);
 
-        let active_row = rows.iter().find(|r| r.session_id == "active-session").unwrap();
+        let active_row = rows
+            .iter()
+            .find(|r| r.session_id == "active-session")
+            .unwrap();
         assert_eq!(active_row.status, "active");
 
-        let stale_row = rows.iter().find(|r| r.session_id == "stale-session").unwrap();
-        assert!(stale_row.status.starts_with("idle"), "expected idle status, got: {}", stale_row.status);
+        let stale_row = rows
+            .iter()
+            .find(|r| r.session_id == "stale-session")
+            .unwrap();
+        assert!(
+            stale_row.status.starts_with("idle"),
+            "expected idle status, got: {}",
+            stale_row.status
+        );
     }
 
     #[test]

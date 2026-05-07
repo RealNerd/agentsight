@@ -5,8 +5,8 @@ use tokio::sync::broadcast;
 use tokio::time::{self, Duration};
 
 use crate::config::Config;
-use crate::cost::calculator::cache_hit_ratio;
 use crate::cost::calculate_usage_cost;
+use crate::cost::calculator::cache_hit_ratio;
 use crate::output::json::{session_to_json, WatchSnapshotJson};
 use crate::parser::reader::{self, decode_project_path};
 use crate::parser::session_index;
@@ -43,17 +43,15 @@ pub async fn run_watcher(
         // Re-discover sessions every 5 ticks
         if tick.is_multiple_of(5) {
             if let Ok(session_files) = session_index::discover_sessions(&claude_dir) {
-                let mut seen: std::collections::HashSet<PathBuf> =
-                    std::collections::HashSet::new();
+                let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
 
                 for sf in &session_files {
                     seen.insert(sf.path.clone());
 
                     if !tracked.contains_key(&sf.path) {
                         let project_path = decode_project_path(&sf.project_dir_name);
-                        let current_size = std::fs::metadata(&sf.path)
-                            .map(|m| m.len())
-                            .unwrap_or(0);
+                        let current_size =
+                            std::fs::metadata(&sf.path).map(|m| m.len()).unwrap_or(0);
 
                         tracked.insert(
                             sf.path.clone(),
@@ -100,15 +98,14 @@ pub async fn run_watcher(
                     );
 
                     let model_name = summary.model.as_deref().unwrap_or("claude-opus-4-6");
-                    let pricing = config
-                        .pricing_for_model(model_name)
-                        .cloned()
-                        .unwrap_or(crate::config::ModelPricing {
+                    let pricing = config.pricing_for_model(model_name).cloned().unwrap_or(
+                        crate::config::ModelPricing {
                             input_per_million: 5.0,
                             output_per_million: 25.0,
                             cache_creation_per_million: 6.25,
                             cache_read_per_million: 0.5,
-                        });
+                        },
+                    );
 
                     let cost = calculate_usage_cost(&summary.total_usage, &pricing);
                     let hit = cache_hit_ratio(&summary.total_usage);
@@ -134,13 +131,7 @@ pub async fn run_watcher(
             let total_tokens: u64 = tracked
                 .values()
                 .filter(|ws| ws.ever_changed && ws.summary.is_some())
-                .map(|ws| {
-                    ws.summary
-                        .as_ref()
-                        .unwrap()
-                        .total_usage
-                        .total_tokens()
-                })
+                .map(|ws| ws.summary.as_ref().unwrap().total_usage.total_tokens())
                 .sum();
 
             // Skip broadcast if tokens and session count are unchanged

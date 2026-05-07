@@ -109,15 +109,16 @@ fn accumulate_session(data: &mut SummaryData, summary: &SessionSummary, config: 
         .as_deref()
         .unwrap_or("claude-opus-4-6")
         .to_string();
-    let pricing = config
-        .pricing_for_model(&model_name)
-        .cloned()
-        .unwrap_or(crate::config::ModelPricing {
-            input_per_million: 5.0,
-            output_per_million: 25.0,
-            cache_creation_per_million: 6.25,
-            cache_read_per_million: 0.5,
-        });
+    let pricing =
+        config
+            .pricing_for_model(&model_name)
+            .cloned()
+            .unwrap_or(crate::config::ModelPricing {
+                input_per_million: 5.0,
+                output_per_million: 25.0,
+                cache_creation_per_million: 6.25,
+                cache_read_per_million: 0.5,
+            });
 
     let cost = calculate_usage_cost(&summary.total_usage, &pricing);
     let cost_total = cost.total();
@@ -132,15 +133,9 @@ fn accumulate_session(data: &mut SummaryData, summary: &SessionSummary, config: 
         .cost_by_project
         .entry(short_project.clone())
         .or_default() += cost_total;
-    *data
-        .sessions_by_project
-        .entry(short_project)
-        .or_default() += 1;
+    *data.sessions_by_project.entry(short_project).or_default() += 1;
 
-    *data
-        .tokens_by_model
-        .entry(model_name.clone())
-        .or_default() += session_tokens;
+    *data.tokens_by_model.entry(model_name.clone()).or_default() += session_tokens;
     *data.cost_by_model.entry(model_name).or_default() += cost_total;
 
     data.total_cache_reads += summary.total_usage.cache_read_input_tokens;
@@ -184,9 +179,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
             .by_hour
             .iter()
             .max_by_key(|(_, v)| *v)
-            .map(|(h, t)| {
-                serde_json::json!({ "hour": h, "tokens": t })
-            });
+            .map(|(h, t)| serde_json::json!({ "hour": h, "tokens": t }));
 
         let json = serde_json::json!({
             "sessions": data.session_count,
@@ -196,7 +189,10 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
             "avg_tokens_per_hour": data.total_tokens / data.active_hours.max(1),
             "peak_hour": peak_hour,
         });
-        println!("{}", serde_json::to_string_pretty(&json).unwrap_or_default());
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json).unwrap_or_default()
+        );
         return Ok(());
     }
 
@@ -240,11 +236,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
             };
             let bar = "█".repeat((pct / 5.0) as usize);
             if args.show_cost {
-                let cost = data
-                    .cost_by_project
-                    .get(project)
-                    .copied()
-                    .unwrap_or(0.0);
+                let cost = data.cost_by_project.get(project).copied().unwrap_or(0.0);
                 println!(
                     "  {:<24} {} ({:.1}%) {} {}",
                     project,
@@ -287,12 +279,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
                     format_cost(cost)
                 );
             } else {
-                println!(
-                    "  {:<28} {} ({:.1}%)",
-                    model,
-                    format_tokens(*tokens),
-                    pct
-                );
+                println!("  {:<28} {} ({:.1}%)", model, format_tokens(*tokens), pct);
             }
         }
         println!();
@@ -329,10 +316,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
         }
         if args.show_cost {
             let avg_cost_per_hour = data.total_cost.total() / active_hours as f64;
-            println!(
-                "  Avg cost/hour:        {}",
-                format_cost(avg_cost_per_hour)
-            );
+            println!("  Avg cost/hour:        {}", format_cost(avg_cost_per_hour));
         }
         println!();
     }

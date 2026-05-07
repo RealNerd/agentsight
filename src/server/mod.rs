@@ -27,7 +27,10 @@ pub fn build_router(state: AppState) -> Router {
     let api = Router::new()
         .route("/sessions", get(handlers::list_sessions))
         .route("/sessions/{id}", get(handlers::get_session))
-        .route("/sessions/by-slug/{slug}", get(handlers::get_session_by_slug))
+        .route(
+            "/sessions/by-slug/{slug}",
+            get(handlers::get_session_by_slug),
+        )
         .route("/summary", get(handlers::get_summary))
         .route("/config", get(handlers::get_config))
         .route("/projects", get(handlers::list_projects))
@@ -53,7 +56,11 @@ async fn static_handler(uri: Uri) -> Response {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
             return (
                 StatusCode::OK,
-                [(header::CONTENT_TYPE, HeaderValue::from_str(mime.as_ref()).unwrap_or(HeaderValue::from_static("application/octet-stream")))],
+                [(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_str(mime.as_ref())
+                        .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+                )],
                 file.data.to_vec(),
             )
                 .into_response();
