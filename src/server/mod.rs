@@ -9,7 +9,6 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use rust_embed::Embed;
-use tower_http::cors::{Any, CorsLayer};
 
 use self::state::AppState;
 
@@ -18,12 +17,10 @@ use self::state::AppState;
 struct StaticAssets;
 
 /// Build the full axum router with API routes and embedded static assets.
+///
+/// No CORS layer — the SPA is served from the same origin as the API,
+/// and the server binds to 127.0.0.1 only (no cross-origin access needed).
 pub fn build_router(state: AppState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
     let api = Router::new()
         .route("/sessions", get(handlers::list_sessions))
         .route("/sessions/{id}", get(handlers::get_session))
@@ -42,7 +39,6 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1", api)
         .fallback(static_handler)
-        .layer(cors)
         .with_state(state)
 }
 
