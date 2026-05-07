@@ -12,9 +12,9 @@ use crate::commands::timeline::{compute_concurrency, TimelineSession};
 use crate::cost::calculator::cache_hit_ratio;
 use crate::output::json::{
     session_to_json, ClaudeMdJson, ConcurrencySlotJson, ConfigJson, DayBreakdownJson,
-    ModelBreakdownJson, ProjectBenchmarkJson, ProjectBreakdownJson, ProjectDiagnoseJson,
-    ProjectTrendJson, SessionDetailJson, SessionJson, SessionListJson, SummaryJson, TimelineJson,
-    TimelineSessionJson, TokensJson, TrendPointJson, TurnDetailJson,
+    HourBurnJson, ModelBreakdownJson, ProjectBenchmarkJson, ProjectBreakdownJson,
+    ProjectDiagnoseJson, ProjectTrendJson, SessionDetailJson, SessionJson, SessionListJson,
+    SummaryJson, TimelineJson, TimelineSessionJson, TokensJson, TrendPointJson, TurnDetailJson,
 };
 use crate::output::table::shorten_project;
 
@@ -322,10 +322,16 @@ pub async fn get_summary(
         by_hour
             .iter()
             .max_by_key(|(_, v)| *v)
-            .map(|(h, t)| crate::output::json::HourBurnJson {
+            .map(|(h, t)| HourBurnJson {
                 hour: h.clone(),
                 tokens: *t,
             });
+
+    let mut by_hour_json: Vec<HourBurnJson> = by_hour
+        .into_iter()
+        .map(|(hour, tokens)| HourBurnJson { hour, tokens })
+        .collect();
+    by_hour_json.sort_by_key(|h| h.hour.clone());
 
     Ok(Json(SummaryJson {
         period_days: days,
@@ -344,6 +350,7 @@ pub async fn get_summary(
         by_project,
         by_model,
         by_day: by_day_json,
+        by_hour: by_hour_json,
     }))
 }
 

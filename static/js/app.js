@@ -555,6 +555,14 @@ function renderSummaryContent(data, showCost) {
             </div>
         </div>
 
+        ${data.by_hour && data.by_hour.length > 0 ? `
+        <div class="chart-grid">
+            <div class="chart-card" style="grid-column: 1 / -1;">
+                <div class="chart-title">Token Velocity (tokens/hour)</div>
+                <div class="chart-container"><canvas id="summary-velocity"></canvas></div>
+            </div>
+        </div>` : ''}
+
         ${data.by_project.length > 0 ? '<h3 class="page-title">By Project</h3><div id="summary-by-project"></div>' : ''}
         ${data.by_model.length > 0 ? '<h3 class="page-title">By Model</h3><div id="summary-by-model"></div>' : ''}
     `;
@@ -578,6 +586,24 @@ function renderSummaryContent(data, showCost) {
         createDoughnutChart('summary-projects',
             data.by_project.map(p => p.project),
             data.by_project.map(p => p.tokens)
+        );
+    }
+
+    // Velocity chart
+    if (data.by_hour && data.by_hour.length > 0) {
+        const hours = data.by_hour;
+        // For short periods (<=3 unique days), show "HH", otherwise "MM-DD HH"
+        const uniqueDays = new Set(hours.map(h => h.hour.slice(0, 10)));
+        const useShort = uniqueDays.size <= 3;
+        createLineChart('summary-velocity',
+            hours.map(h => useShort ? h.hour.slice(11) + ':00' : h.hour.slice(5)),
+            [{
+                label: 'Tokens/hour',
+                data: hours.map(h => h.tokens),
+                borderColor: COLORS.cyan,
+                backgroundColor: COLORS.cyan + '20',
+                fill: true,
+            }]
         );
     }
 

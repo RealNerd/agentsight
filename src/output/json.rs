@@ -213,6 +213,7 @@ pub struct SummaryJson {
     pub by_project: Vec<ProjectBreakdownJson>,
     pub by_model: Vec<ModelBreakdownJson>,
     pub by_day: Vec<DayBreakdownJson>,
+    pub by_hour: Vec<HourBurnJson>,
 }
 
 #[derive(Serialize, Clone)]

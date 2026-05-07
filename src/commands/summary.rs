@@ -459,6 +459,15 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
             args.by_model,
         );
 
+        let by_hour_json: Vec<_> = {
+            let mut sorted: Vec<_> = data.by_hour.into_iter().collect();
+            sorted.sort_by_key(|(h, _)| h.clone());
+            sorted
+                .iter()
+                .map(|(h, t)| serde_json::json!({"hour": h, "tokens": t}))
+                .collect()
+        };
+
         let json = serde_json::json!({
             "sessions": data.session_count,
             "total_tokens": data.total_tokens,
@@ -467,6 +476,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &SummaryArgs) -> Result<()>
             "avg_tokens_per_hour": data.total_tokens / data.active_hours.max(1),
             "peak_hour": peak_hour,
             "by_model": by_model,
+            "by_hour": by_hour_json,
         });
         println!(
             "{}",
