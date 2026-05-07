@@ -1,3 +1,4 @@
+pub mod aggregation;
 pub mod commands;
 pub mod config;
 pub mod cost;

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use agentsight::commands::summary::{merge_by_family, ModelStats};
+use agentsight::aggregation::{merge_by_family, ModelStats};
 use agentsight::output::table::normalize_model_family;
 use agentsight::parser::reader::{parse_session_file, summarize_session};
 

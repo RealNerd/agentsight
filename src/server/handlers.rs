@@ -4,6 +4,7 @@ use axum::Json;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use crate::aggregation::{accumulate_session, SummaryData};
 use crate::commands::diagnose::{
     analyze_claude_md, analyze_project_trend, compute_project_benchmark, rank_benchmarks,
     CacheClassification, TrendDirection,
@@ -11,8 +12,7 @@ use crate::commands::diagnose::{
 use crate::commands::timeline::{compute_concurrency, TimelineSession};
 use crate::cost::calculator::cache_hit_ratio;
 use crate::output::json::{
-    session_to_json, ClaudeMdJson, ConcurrencySlotJson, ConfigJson, DayBreakdownJson,
-    HourBurnJson, ModelBreakdownJson, ProjectBenchmarkJson, ProjectBreakdownJson,
+    session_to_json, ClaudeMdJson, ConcurrencySlotJson, ConfigJson, ProjectBenchmarkJson,
     ProjectDiagnoseJson, ProjectTrendJson, SessionDetailJson, SessionJson, SessionListJson,
     SummaryJson, TimelineJson, TimelineSessionJson, TokensJson, TrendPointJson, TurnDetailJson,
 };
@@ -177,7 +177,6 @@ pub async fn get_summary(
 
     let all = state.cache.get_all().await;
 
-    // Filter to matching sessions
     let matching: Vec<&CachedSession> = all
         .iter()
         .map(|arc| arc.as_ref())
@@ -188,170 +187,13 @@ pub async fn get_summary(
         })
         .collect();
 
-    // Aggregate
-    let mut total_tokens: u64 = 0;
-    let mut total_cost_val: f64 = 0.0;
-    let mut session_count: u64 = 0;
-    let mut tokens_by_project: HashMap<String, u64> = HashMap::new();
-    let mut cost_by_project: HashMap<String, f64> = HashMap::new();
-    let mut sessions_by_project: HashMap<String, u64> = HashMap::new();
-    let mut tokens_by_model: HashMap<String, u64> = HashMap::new();
-    let mut cost_by_model: HashMap<String, f64> = HashMap::new();
-    let mut total_cache_reads: u64 = 0;
-    let mut total_input_tokens: u64 = 0;
-    let mut by_day: HashMap<String, (u64, f64, u64)> = HashMap::new(); // (tokens, cost, sessions)
-    let mut by_hour: HashMap<String, u64> = HashMap::new();
-
+    let mut data = SummaryData::new(days);
     for cs in &matching {
-        let s = &cs.summary;
-        let tok = s.total_usage.total_tokens();
-        let cost_total = cs.cost.total();
-
-        let short = shorten_project(&cs.project_path);
-        *tokens_by_project.entry(short.clone()).or_default() += tok;
-        *cost_by_project.entry(short.clone()).or_default() += cost_total;
-        *sessions_by_project.entry(short).or_default() += 1;
-
-        let model = s.model.as_deref().unwrap_or("unknown").to_string();
-        *tokens_by_model.entry(model.clone()).or_default() += tok;
-        *cost_by_model.entry(model).or_default() += cost_total;
-
-        total_cache_reads += s.total_usage.cache_read_input_tokens;
-        total_input_tokens += s.total_usage.input_tokens
-            + s.total_usage.cache_creation_input_tokens
-            + s.total_usage.cache_read_input_tokens;
-
-        if let Some(start) = s.start_time {
-            let key = start.format("%Y-%m-%d").to_string();
-            let entry = by_day.entry(key).or_default();
-            entry.0 += tok;
-            entry.1 += cost_total;
-            entry.2 += 1;
-        }
-
-        // Bucket turns by hour for burn rate
-        for turn in &s.turns {
-            if let Some(ts) = turn.timestamp {
-                let hour_key = ts.format("%Y-%m-%d %H").to_string();
-                *by_hour.entry(hour_key).or_default() += turn.usage.total_tokens();
-            }
-        }
-
-        total_tokens += tok;
-        total_cost_val += cost_total;
-        session_count += 1;
+        accumulate_session(&mut data, &cs.summary, &state.config);
     }
+    data.finalize();
 
-    let cache_hit_ratio = if total_input_tokens > 0 {
-        total_cache_reads as f64 / total_input_tokens as f64
-    } else {
-        0.0
-    };
-
-    let avg_tokens = total_tokens.checked_div(session_count).unwrap_or(0);
-
-    let show_cost = state.show_cost;
-
-    let mut by_project: Vec<ProjectBreakdownJson> = tokens_by_project
-        .iter()
-        .map(|(project, tokens)| {
-            let pct = if total_tokens > 0 {
-                *tokens as f64 / total_tokens as f64 * 100.0
-            } else {
-                0.0
-            };
-            ProjectBreakdownJson {
-                project: project.clone(),
-                tokens: *tokens,
-                cost: if show_cost {
-                    Some(cost_by_project.get(project).copied().unwrap_or(0.0))
-                } else {
-                    None
-                },
-                sessions: sessions_by_project.get(project).copied().unwrap_or(0),
-                pct,
-            }
-        })
-        .collect();
-    by_project.sort_by_key(|p| std::cmp::Reverse(p.tokens));
-
-    let mut by_model: Vec<ModelBreakdownJson> = tokens_by_model
-        .iter()
-        .map(|(model, tokens)| {
-            let pct = if total_tokens > 0 {
-                *tokens as f64 / total_tokens as f64 * 100.0
-            } else {
-                0.0
-            };
-            ModelBreakdownJson {
-                model: model.clone(),
-                tokens: *tokens,
-                cost: if show_cost {
-                    Some(cost_by_model.get(model).copied().unwrap_or(0.0))
-                } else {
-                    None
-                },
-                pct,
-                turns: None,
-                sessions: None,
-                avg_input_per_turn: None,
-                avg_output_per_turn: None,
-                cache_hit_pct: None,
-                bash_loops_per_100t: None,
-                exploration_ratio: None,
-                subagent_count: None,
-            }
-        })
-        .collect();
-    by_model.sort_by_key(|m| std::cmp::Reverse(m.tokens));
-
-    let mut by_day_json: Vec<DayBreakdownJson> = by_day
-        .into_iter()
-        .map(|(date, (tokens, cost, sessions))| DayBreakdownJson {
-            date,
-            tokens,
-            cost: if show_cost { Some(cost) } else { None },
-            sessions,
-        })
-        .collect();
-    by_day_json.sort_by_key(|d| d.date.clone());
-
-    let active_hours = by_hour.len() as u64;
-    let avg_tokens_per_hour = total_tokens.checked_div(active_hours.max(1)).unwrap_or(0);
-    let peak_hour =
-        by_hour
-            .iter()
-            .max_by_key(|(_, v)| *v)
-            .map(|(h, t)| HourBurnJson {
-                hour: h.clone(),
-                tokens: *t,
-            });
-
-    let mut by_hour_json: Vec<HourBurnJson> = by_hour
-        .into_iter()
-        .map(|(hour, tokens)| HourBurnJson { hour, tokens })
-        .collect();
-    by_hour_json.sort_by_key(|h| h.hour.clone());
-
-    Ok(Json(SummaryJson {
-        period_days: days,
-        session_count,
-        total_tokens,
-        total_cost: if show_cost {
-            Some(total_cost_val)
-        } else {
-            None
-        },
-        avg_tokens_per_session: avg_tokens,
-        cache_hit_ratio,
-        active_hours,
-        avg_tokens_per_hour,
-        peak_hour,
-        by_project,
-        by_model,
-        by_day: by_day_json,
-        by_hour: by_hour_json,
-    }))
+    Ok(Json(data.to_summary_json(state.show_cost, false)))
 }
 
 pub async fn get_config(State(state): State<AppState>) -> Json<ConfigJson> {
