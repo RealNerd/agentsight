@@ -59,7 +59,7 @@ fn multi_model_per_turn_stats() {
     let opus = model_map.get("claude-opus-4-6").expect("opus should exist");
     assert_eq!(opus.turns, 2);
     assert_eq!(opus.total_output, 300 + 250);
-    assert_eq!(opus.cache_read, 0 + 4000);
+    assert_eq!(opus.cache_read, 4000);
     assert_eq!(opus.cache_creation, 3000 + 100);
 
     // Sonnet: 2 turns

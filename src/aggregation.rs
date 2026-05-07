@@ -183,14 +183,14 @@ impl SummaryData {
         let active_hours = self.active_hours.max(1);
         let avg_tokens_per_hour = self.total_tokens.checked_div(active_hours).unwrap_or(0);
 
-        let peak_hour =
-            self.by_hour
-                .iter()
-                .max_by_key(|(_, v)| *v)
-                .map(|(h, t)| HourBurnJson {
-                    hour: h.clone(),
-                    tokens: *t,
-                });
+        let peak_hour = self
+            .by_hour
+            .iter()
+            .max_by_key(|(_, v)| *v)
+            .map(|(h, t)| HourBurnJson {
+                hour: h.clone(),
+                tokens: *t,
+            });
 
         // by_project
         let mut by_project: Vec<ProjectBreakdownJson> = self
@@ -206,20 +206,11 @@ impl SummaryData {
                     project: project.clone(),
                     tokens: *tokens,
                     cost: if show_cost {
-                        Some(
-                            self.cost_by_project
-                                .get(project)
-                                .copied()
-                                .unwrap_or(0.0),
-                        )
+                        Some(self.cost_by_project.get(project).copied().unwrap_or(0.0))
                     } else {
                         None
                     },
-                    sessions: self
-                        .sessions_by_project
-                        .get(project)
-                        .copied()
-                        .unwrap_or(0),
+                    sessions: self.sessions_by_project.get(project).copied().unwrap_or(0),
                     pct,
                 }
             })
@@ -241,11 +232,7 @@ impl SummaryData {
             .map(|(date, bucket)| DayBreakdownJson {
                 date: date.clone(),
                 tokens: bucket.tokens,
-                cost: if show_cost {
-                    Some(bucket.cost)
-                } else {
-                    None
-                },
+                cost: if show_cost { Some(bucket.cost) } else { None },
                 sessions: bucket.sessions,
             })
             .collect();

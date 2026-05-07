@@ -12,10 +12,7 @@ fn setup_populated_claude_dir() -> TempDir {
     let tmp = TempDir::new().unwrap();
 
     // Create projects dir with a fake project and session
-    let project_dir = tmp
-        .path()
-        .join("projects")
-        .join("-Users-test-myproject");
+    let project_dir = tmp.path().join("projects").join("-Users-test-myproject");
     fs::create_dir_all(&project_dir).unwrap();
 
     // Write a minimal valid JSONL session file
@@ -170,13 +167,11 @@ fn compute_grade_all_pass() {
 fn compute_grade_missing_core() {
     use agentsight::commands::health::CheckItem;
 
-    let items = vec![
-        CheckItem {
-            name: "~/.claude/ directory".to_string(),
-            status: CheckStatus::Missing,
-            detail: "".to_string(),
-            recommendation: None,
-        },
-    ];
+    let items = vec![CheckItem {
+        name: "~/.claude/ directory".to_string(),
+        status: CheckStatus::Missing,
+        detail: "".to_string(),
+        recommendation: None,
+    }];
     assert_eq!(compute_grade(&items), OverallGrade::NeedsWork);
 }

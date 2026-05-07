@@ -13,6 +13,7 @@ dependencies = [
  "comfy-table",
  "crossterm 0.28.1",
  "dirs",
+ "http-body-util",
  "mime_guess",
  "notify",
  "open",
@@ -23,6 +24,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml",
+ "tower",
 ]
 
 [[package]]

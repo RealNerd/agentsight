@@ -240,7 +240,7 @@ fn build_rows(
         })
         .collect();
 
-    rows.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.tokens));
     rows
 }
 
@@ -535,8 +535,10 @@ mod tests {
 
         for (i, tokens) in [500u64, 2000, 1000].iter().enumerate() {
             let id = format!("session-{i}");
-            let mut usage = crate::parser::types::TokenUsage::default();
-            usage.input_tokens = *tokens;
+            let usage = crate::parser::types::TokenUsage {
+                input_tokens: *tokens,
+                ..Default::default()
+            };
 
             tracked.insert(
                 PathBuf::from(format!("/tmp/{i}.jsonl")),

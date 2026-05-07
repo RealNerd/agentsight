@@ -2179,11 +2179,11 @@ mod tests {
     fn test_efficiency_score_boundaries() {
         // Cache hit = 0, all other factors bad
         let score = efficiency_score(0.0, 5.0, 1.0, &CacheClassification::Degrading);
-        assert!(score >= 0.0 && score <= 1.0);
+        assert!((0.0..=1.0).contains(&score));
 
         // Cache hit = 1, all other factors perfect
         let score = efficiency_score(1.0, 0.0, 0.0, &CacheClassification::Stable);
-        assert!(score >= 0.0 && score <= 1.0);
+        assert!((0.0..=1.0).contains(&score));
         assert!((score - 1.0).abs() < 0.01);
     }
 

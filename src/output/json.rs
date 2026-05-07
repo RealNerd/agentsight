@@ -1,11 +1,11 @@
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cost::CostBreakdown;
 use crate::parser::types::SessionSummary;
 use std::collections::HashMap;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SessionListJson {
     pub sessions: Vec<SessionJson>,
     pub total_tokens: u64,
@@ -14,7 +14,7 @@ pub struct SessionListJson {
     pub total_cost: Option<f64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SessionJson {
     pub session_id: String,
     pub slug: Option<String>,
@@ -30,7 +30,7 @@ pub struct SessionJson {
     pub cost: Option<CostJson>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct CostJson {
     pub input: f64,
     pub cache_creation: f64,
@@ -39,7 +39,7 @@ pub struct CostJson {
     pub total: f64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TokensJson {
     pub input: u64,
     pub cache_creation: u64,
@@ -181,7 +181,7 @@ pub fn print_sessions_json(items: &[(SessionSummary, CostBreakdown, f64)], show_
 
 // ── Dashboard API types ───────────────────────────────────────────
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TurnDetailJson {
     pub index: usize,
     pub timestamp: Option<String>,
@@ -190,7 +190,7 @@ pub struct TurnDetailJson {
     pub model: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SessionDetailJson {
     #[serde(flatten)]
     pub session: SessionJson,
@@ -198,7 +198,7 @@ pub struct SessionDetailJson {
     pub turn_details: Vec<TurnDetailJson>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct SummaryJson {
     pub period_days: u64,
     pub session_count: u64,
@@ -216,13 +216,13 @@ pub struct SummaryJson {
     pub by_hour: Vec<HourBurnJson>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct HourBurnJson {
     pub hour: String,
     pub tokens: u64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ProjectBreakdownJson {
     pub project: String,
     pub tokens: u64,
@@ -232,7 +232,7 @@ pub struct ProjectBreakdownJson {
     pub pct: f64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ModelBreakdownJson {
     pub model: String,
     pub tokens: u64,
@@ -257,7 +257,7 @@ pub struct ModelBreakdownJson {
     pub subagent_count: Option<u64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct DayBreakdownJson {
     pub date: String,
     pub tokens: u64,
@@ -268,7 +268,7 @@ pub struct DayBreakdownJson {
 
 // ── Timeline types ────────────────────────────────────────────────
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TimelineJson {
     pub period_start: String,
     pub period_end: String,
@@ -279,7 +279,7 @@ pub struct TimelineJson {
     pub total_sessions: usize,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TimelineSessionJson {
     pub session_id: String,
     pub slug: Option<String>,
@@ -295,14 +295,14 @@ pub struct TimelineSessionJson {
     pub cost: Option<f64>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ConcurrencySlotJson {
     pub time: String,
     pub count: u64,
     pub tokens: u64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ConfigJson {
     pub billing_mode: String,
     pub show_cost: bool,
@@ -376,7 +376,7 @@ pub struct BashRetryJson {
 
 // ── Project-level Diagnose types ──────────────────────────────────
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ProjectDiagnoseJson {
     pub period_days: u64,
     pub project_count: usize,
@@ -390,7 +390,7 @@ pub struct ProjectDiagnoseJson {
     pub recommendations: Vec<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ProjectBenchmarkJson {
     pub project: String,
     pub session_count: usize,
@@ -403,7 +403,7 @@ pub struct ProjectBenchmarkJson {
     pub efficiency_score: f64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ProjectTrendJson {
     pub direction: String,
     pub recent_avg_cache_hit: f64,
@@ -411,7 +411,7 @@ pub struct ProjectTrendJson {
     pub points: Vec<TrendPointJson>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct TrendPointJson {
     pub session_id: String,
     pub slug: Option<String>,
@@ -421,7 +421,7 @@ pub struct TrendPointJson {
     pub classification: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ClaudeMdJson {
     pub exists: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

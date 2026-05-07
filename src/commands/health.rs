@@ -93,9 +93,7 @@ pub fn run_environment_check(claude_dir: &Path) -> EnvironmentCheck {
             name: "~/.claude/ directory".to_string(),
             status: CheckStatus::Missing,
             detail: "Not found".to_string(),
-            recommendation: Some(
-                "Install Claude Code to create this directory.".to_string(),
-            ),
+            recommendation: Some("Install Claude Code to create this directory.".to_string()),
         });
     }
 
@@ -116,9 +114,7 @@ pub fn run_environment_check(claude_dir: &Path) -> EnvironmentCheck {
                 name: "~/.claude/projects/".to_string(),
                 status: CheckStatus::Warn,
                 detail: "Directory exists but no sessions found".to_string(),
-                recommendation: Some(
-                    "Run a Claude Code session to generate data.".to_string(),
-                ),
+                recommendation: Some("Run a Claude Code session to generate data.".to_string()),
             });
         }
     } else {
@@ -126,20 +122,24 @@ pub fn run_environment_check(claude_dir: &Path) -> EnvironmentCheck {
             name: "~/.claude/projects/".to_string(),
             status: CheckStatus::Missing,
             detail: "Not found".to_string(),
-            recommendation: Some(
-                "Run a Claude Code session to create this directory.".to_string(),
-            ),
+            recommendation: Some("Run a Claude Code session to create this directory.".to_string()),
         });
     }
 
     // 3. ~/.claude/CLAUDE.md (global)
     let global_claude_md = claude_dir.join("CLAUDE.md");
-    items.push(check_claude_md_file(&global_claude_md, "~/.claude/CLAUDE.md"));
+    items.push(check_claude_md_file(
+        &global_claude_md,
+        "~/.claude/CLAUDE.md",
+    ));
 
     // 4. Project CLAUDE.md (cwd)
     let cwd = std::env::current_dir().unwrap_or_default();
     let project_claude_md = cwd.join("CLAUDE.md");
-    items.push(check_claude_md_file(&project_claude_md, "Project CLAUDE.md"));
+    items.push(check_claude_md_file(
+        &project_claude_md,
+        "Project CLAUDE.md",
+    ));
 
     // 5. ~/.claude/settings.json
     let settings = claude_dir.join("settings.json");
@@ -221,9 +221,7 @@ fn check_claude_md_file(path: &Path, display_name: &str) -> CheckItem {
             status: CheckStatus::Missing,
             detail: "Not found".to_string(),
             recommendation: if display_name.contains("~/.claude") {
-                Some(
-                    "Create a ~/.claude/CLAUDE.md with global rules and preferences.".to_string(),
-                )
+                Some("Create a ~/.claude/CLAUDE.md with global rules and preferences.".to_string())
             } else {
                 None
             },
@@ -240,12 +238,7 @@ fn count_session_files(projects_dir: &Path) -> u64 {
             }
             if let Ok(files) = std::fs::read_dir(entry.path()) {
                 for file in files.flatten() {
-                    if file
-                        .path()
-                        .extension()
-                        .and_then(|e| e.to_str())
-                        == Some("jsonl")
-                    {
+                    if file.path().extension().and_then(|e| e.to_str()) == Some("jsonl") {
                         count += 1;
                     }
                 }
@@ -260,8 +253,12 @@ fn count_session_files(projects_dir: &Path) -> u64 {
 /// - Fair: Core items exist but have warnings (oversized CLAUDE.md, empty projects)
 /// - NeedsWork: ~/.claude/ or projects/ missing
 pub fn compute_grade(items: &[CheckItem]) -> OverallGrade {
-    let claude_dir = items.iter().find(|i| i.name.contains("~/.claude/ directory"));
-    let projects = items.iter().find(|i| i.name.contains("~/.claude/projects/"));
+    let claude_dir = items
+        .iter()
+        .find(|i| i.name.contains("~/.claude/ directory"));
+    let projects = items
+        .iter()
+        .find(|i| i.name.contains("~/.claude/projects/"));
 
     // NeedsWork if core dirs are missing
     if let Some(item) = claude_dir {
@@ -343,10 +340,7 @@ pub fn compute_baseline(
     };
 
     // Generate top recommendations
-    let top_recommendations = generate_baseline_recommendations(
-        &benchmarks,
-        global_avg_cache_hit,
-    );
+    let top_recommendations = generate_baseline_recommendations(&benchmarks, global_avg_cache_hit);
 
     Ok(BaselineReport {
         session_count,
@@ -378,9 +372,7 @@ fn generate_baseline_recommendations(
 
     // Global cache hit below 80%
     if global_avg_cache_hit < 0.8 {
-        recs.push(
-            "Global cache hit is below 80%. Shorter, focused sessions help.".to_string(),
-        );
+        recs.push("Global cache hit is below 80%. Shorter, focused sessions help.".to_string());
     }
 
     // Cap at 3
@@ -391,7 +383,10 @@ fn generate_baseline_recommendations(
 // ── Next steps generation ────────────────────────────────────────
 
 /// Generate next steps from environment check and optional baseline.
-pub fn generate_next_steps(env: &EnvironmentCheck, baseline: Option<&BaselineReport>) -> Vec<NextStep> {
+pub fn generate_next_steps(
+    env: &EnvironmentCheck,
+    baseline: Option<&BaselineReport>,
+) -> Vec<NextStep> {
     let mut steps = Vec::new();
 
     // Check if CC is installed
@@ -409,13 +404,10 @@ pub fn generate_next_steps(env: &EnvironmentCheck, baseline: Option<&BaselineRep
     }
 
     // Check for no sessions
-    let no_sessions = env
-        .items
-        .iter()
-        .any(|i| {
-            i.name.contains("~/.claude/projects/")
-                && matches!(i.status, CheckStatus::Missing | CheckStatus::Warn)
-        });
+    let no_sessions = env.items.iter().any(|i| {
+        i.name.contains("~/.claude/projects/")
+            && matches!(i.status, CheckStatus::Missing | CheckStatus::Warn)
+    });
 
     if no_sessions {
         steps.push(NextStep {
@@ -432,7 +424,8 @@ pub fn generate_next_steps(env: &EnvironmentCheck, baseline: Option<&BaselineRep
 
     if global_md_missing {
         steps.push(NextStep {
-            description: "Create a ~/.claude/CLAUDE.md with global rules and preferences.".to_string(),
+            description: "Create a ~/.claude/CLAUDE.md with global rules and preferences."
+                .to_string(),
             command: None,
         });
     }
@@ -445,7 +438,9 @@ pub fn generate_next_steps(env: &EnvironmentCheck, baseline: Option<&BaselineRep
 
     if md_oversized {
         steps.push(NextStep {
-            description: "Trim oversized CLAUDE.md files to <8K tokens for better cache efficiency.".to_string(),
+            description:
+                "Trim oversized CLAUDE.md files to <8K tokens for better cache efficiency."
+                    .to_string(),
             command: None,
         });
     }
@@ -663,8 +658,7 @@ fn truncate_str(s: &str, max: usize) -> String {
 
 fn render_json(report: &HealthReport) {
     use crate::output::json::{
-        CheckItemJson, EnvironmentCheckJson, HealthJson, NextStepJson,
-        BaselineReportJson,
+        BaselineReportJson, CheckItemJson, EnvironmentCheckJson, HealthJson, NextStepJson,
     };
 
     let environment = EnvironmentCheckJson {
@@ -690,30 +684,28 @@ fn render_json(report: &HealthReport) {
             .collect(),
     };
 
-    let baseline = report.baseline.as_ref().map(|b| {
-        BaselineReportJson {
-            session_count: b.session_count,
-            total_tokens: b.total_tokens,
-            project_count: b.project_count,
-            global_avg_cache_hit: b.global_avg_cache_hit,
-            benchmarks: b
-                .benchmarks
-                .iter()
-                .map(|bm| ProjectBenchmarkJson {
-                    project: bm.project.clone(),
-                    session_count: bm.session_count,
-                    avg_tokens_per_session: bm.avg_tokens_per_session,
-                    avg_cache_hit: bm.avg_cache_hit,
-                    dominant_classification: classification_str(&bm.dominant_classification)
-                        .to_string(),
-                    bash_loop_count: bm.bash_loop_count,
-                    bash_retry_count: bm.bash_retry_count,
-                    exploration_count: bm.exploration_count,
-                    efficiency_score: bm.efficiency_score,
-                })
-                .collect(),
-            top_recommendations: b.top_recommendations.clone(),
-        }
+    let baseline = report.baseline.as_ref().map(|b| BaselineReportJson {
+        session_count: b.session_count,
+        total_tokens: b.total_tokens,
+        project_count: b.project_count,
+        global_avg_cache_hit: b.global_avg_cache_hit,
+        benchmarks: b
+            .benchmarks
+            .iter()
+            .map(|bm| ProjectBenchmarkJson {
+                project: bm.project.clone(),
+                session_count: bm.session_count,
+                avg_tokens_per_session: bm.avg_tokens_per_session,
+                avg_cache_hit: bm.avg_cache_hit,
+                dominant_classification: classification_str(&bm.dominant_classification)
+                    .to_string(),
+                bash_loop_count: bm.bash_loop_count,
+                bash_retry_count: bm.bash_retry_count,
+                exploration_count: bm.exploration_count,
+                efficiency_score: bm.efficiency_score,
+            })
+            .collect(),
+        top_recommendations: b.top_recommendations.clone(),
     });
 
     let next_steps: Vec<NextStepJson> = report
@@ -867,7 +859,9 @@ mod tests {
             ],
         };
         let steps = generate_next_steps(&env, None);
-        assert!(steps.iter().any(|s| s.description.contains("Run a Claude Code session")));
+        assert!(steps
+            .iter()
+            .any(|s| s.description.contains("Run a Claude Code session")));
     }
 
     #[test]
@@ -898,8 +892,12 @@ mod tests {
         let steps = generate_next_steps(&env, None);
         assert!(steps.iter().any(|s| s.description.contains("CLAUDE.md")));
         // Should always have summary and watch
-        assert!(steps.iter().any(|s| s.command.as_deref() == Some("agentsight summary --days 30")));
-        assert!(steps.iter().any(|s| s.command.as_deref() == Some("agentsight watch")));
+        assert!(steps
+            .iter()
+            .any(|s| s.command.as_deref() == Some("agentsight summary --days 30")));
+        assert!(steps
+            .iter()
+            .any(|s| s.command.as_deref() == Some("agentsight watch")));
     }
 
     #[test]
@@ -958,16 +956,16 @@ mod tests {
                     efficiency_score: 0.72,
                 },
             ],
-            top_recommendations: vec![
-                "Global cache hit is below 80%.".to_string(),
-            ],
+            top_recommendations: vec!["Global cache hit is below 80%.".to_string()],
         };
 
         let steps = generate_next_steps(&env, Some(&baseline));
         // Should suggest drilling into least efficient project
         assert!(steps.iter().any(|s| s.description.contains("work/backend")));
         // Should always have summary and watch
-        assert!(steps.iter().any(|s| s.command.as_deref() == Some("agentsight summary --days 30")));
+        assert!(steps
+            .iter()
+            .any(|s| s.command.as_deref() == Some("agentsight summary --days 30")));
     }
 
     #[test]
