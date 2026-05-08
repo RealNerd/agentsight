@@ -53,12 +53,7 @@ mod tests {
     use super::*;
 
     fn opus_pricing() -> ModelPricing {
-        ModelPricing {
-            input_per_million: 5.00,
-            output_per_million: 25.00,
-            cache_creation_per_million: 6.25,
-            cache_read_per_million: 0.50,
-        }
+        ModelPricing::default()
     }
 
     #[test]

@@ -273,13 +273,6 @@ impl SummaryData {
 
 /// Accumulate a single session's data into the running `SummaryData` totals.
 pub fn accumulate_session(data: &mut SummaryData, summary: &SessionSummary, config: &Config) {
-    let default_pricing = crate::config::ModelPricing {
-        input_per_million: 5.0,
-        output_per_million: 25.0,
-        cache_creation_per_million: 6.25,
-        cache_read_per_million: 0.5,
-    };
-
     let session_tokens = summary.total_usage.total_tokens();
 
     // Per-project accumulation
@@ -321,7 +314,7 @@ pub fn accumulate_session(data: &mut SummaryData, summary: &SessionSummary, conf
         let pricing = config
             .pricing_for_model(turn_model)
             .cloned()
-            .unwrap_or(default_pricing.clone());
+            .unwrap_or_default();
         let turn_cost = calculate_usage_cost(&turn.usage, &pricing);
 
         let ms = data
@@ -407,7 +400,7 @@ pub fn accumulate_session(data: &mut SummaryData, summary: &SessionSummary, conf
         let pricing = config
             .pricing_for_model(turn_model)
             .cloned()
-            .unwrap_or(default_pricing.clone());
+            .unwrap_or_default();
         session_cost += calculate_usage_cost(&turn.usage, &pricing);
     }
     let session_cost_total = session_cost.total();

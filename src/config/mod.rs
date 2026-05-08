@@ -38,6 +38,17 @@ pub struct ModelPricing {
     pub cache_read_per_million: f64,
 }
 
+impl Default for ModelPricing {
+    fn default() -> Self {
+        Self {
+            input_per_million: 5.0,
+            output_per_million: 25.0,
+            cache_creation_per_million: 6.25,
+            cache_read_per_million: 0.5,
+        }
+    }
+}
+
 impl Config {
     /// Load config: start with compiled-in defaults, merge user overrides if present.
     pub fn load(override_path: Option<&Path>) -> Result<Self> {

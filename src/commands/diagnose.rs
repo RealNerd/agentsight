@@ -1190,12 +1190,7 @@ fn lookup_pricing(config: &Config, model: Option<&str>) -> crate::config::ModelP
     config
         .pricing_for_model(model_name)
         .cloned()
-        .unwrap_or(crate::config::ModelPricing {
-            input_per_million: 5.0,
-            output_per_million: 25.0,
-            cache_creation_per_million: 6.25,
-            cache_read_per_million: 0.5,
-        })
+        .unwrap_or_default()
 }
 
 // ── Text rendering ────────────────────────────────────────────────

@@ -137,14 +137,10 @@ pub fn run(claude_dir: &Path, config: &Config, args: &WatchArgs) -> Result<()> {
                     );
 
                     let model_name = summary.model.as_deref().unwrap_or("claude-opus-4-6");
-                    let pricing = config.pricing_for_model(model_name).cloned().unwrap_or(
-                        crate::config::ModelPricing {
-                            input_per_million: 5.0,
-                            output_per_million: 25.0,
-                            cache_creation_per_million: 6.25,
-                            cache_read_per_million: 0.5,
-                        },
-                    );
+                    let pricing = config
+                        .pricing_for_model(model_name)
+                        .cloned()
+                        .unwrap_or_default();
 
                     let cost = calculate_usage_cost(&summary.total_usage, &pricing);
                     let hit = cache_hit_ratio(&summary.total_usage);
