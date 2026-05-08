@@ -21,6 +21,9 @@ use crate::output::table::shorten_project;
 use super::cache::CachedSession;
 use super::state::AppState;
 
+const MAX_DAYS: u64 = 365;
+const MAX_LIMIT: usize = 500;
+
 #[derive(Deserialize)]
 pub struct SessionsQuery {
     pub days: Option<u64>,
@@ -35,8 +38,8 @@ pub async fn list_sessions(
 ) -> Result<Json<SessionListJson>, StatusCode> {
     state.cache.refresh().await;
 
-    let days = query.days.unwrap_or(7);
-    let limit = query.limit.unwrap_or(50);
+    let days = query.days.unwrap_or(7).min(MAX_DAYS);
+    let limit = query.limit.unwrap_or(50).min(MAX_LIMIT);
     let sort = query.sort.as_deref().unwrap_or("date");
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
 
@@ -172,7 +175,7 @@ pub async fn get_summary(
 ) -> Result<Json<SummaryJson>, StatusCode> {
     state.cache.refresh().await;
 
-    let days = query.days.unwrap_or(7);
+    let days = query.days.unwrap_or(7).min(MAX_DAYS);
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
 
     let all = state.cache.get_all().await;
@@ -223,7 +226,7 @@ pub async fn get_timeline(
 ) -> Result<Json<TimelineJson>, StatusCode> {
     state.cache.refresh().await;
 
-    let days = query.days.unwrap_or(1);
+    let days = query.days.unwrap_or(1).min(MAX_DAYS);
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
 
     let all = state.cache.get_all().await;
@@ -351,7 +354,7 @@ pub async fn get_diagnose(
 ) -> Result<Json<ProjectDiagnoseJson>, StatusCode> {
     state.cache.refresh().await;
 
-    let days = query.days.unwrap_or(7);
+    let days = query.days.unwrap_or(7).min(MAX_DAYS);
     let with_context = query.with_context.unwrap_or(false);
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
 
