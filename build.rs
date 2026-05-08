@@ -17,7 +17,7 @@ fn main() {
     let hash_str = match git_hash {
         Some(hash) if git_dirty => format!("{hash}-dirty"),
         Some(hash) => hash,
-        None => "unknown".to_string(),
+        None => format!("v{}", std::env::var("CARGO_PKG_VERSION").unwrap()),
     };
 
     println!("cargo::rustc-env=AGENTSIGHT_GIT_HASH={hash_str}");
