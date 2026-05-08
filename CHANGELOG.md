@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-08
+
 ### Added
+- Core CLI with `sessions`, `session`, `summary`, `watch` subcommands
+- JSONL parser for Claude Code session logs (`~/.claude/projects/`)
+- Token attribution by bucket: input, cache creation, cache read, output
+- Cache efficiency metrics and hit ratio tracking
+- Optional cost estimation with configurable model pricing
+- `--json` flag on every command for scriptability
+- `--cost` flag and billing mode config (max vs api)
+- Auto-generated config at `~/.agentsight/config.toml` on first run
+- Compiled-in default pricing with user override support
+- `diagnose` subcommand for session efficiency analysis
 - Token velocity time-series chart on the Summary dashboard page
 - Per-model comparison table (`summary --by-model`) and model distribution in diagnose
 - `health` subcommand for environment check and baseline usage report
@@ -23,7 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slug matching with same-slug session disambiguation
 - Dual MIT/Apache-2.0 licensing
 - README with installation, quick start, and command reference
+- CONTRIBUTING.md for open-source onboarding
 - Cargo.toml publishing metadata (repository, keywords, categories)
+- Shell completions subcommand (bash, zsh, fish)
+- Build info in `--version` output (git hash, date)
+- `--help` examples on all subcommands
+- Dashboard port-conflict UX: detect, reuse, or replace existing instances
 
 ### Changed
 - Removed permissive CORS (allow-origin: *) from dashboard server — same-origin only
@@ -32,17 +49,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Dashboard SSE deduplication and pause-on-hidden-tab for performance
 - Synthetic model entries filtered from display
-
-## [0.1.0] - Initial Development
-
-### Added
-- Core CLI with `sessions`, `session`, `summary`, `watch` subcommands
-- JSONL parser for Claude Code session logs (`~/.claude/projects/`)
-- Token attribution by bucket: input, cache creation, cache read, output
-- Cache efficiency metrics and hit ratio tracking
-- Optional cost estimation with configurable model pricing
-- `--json` flag on every command for scriptability
-- `--cost` flag and billing mode config (max vs api)
-- Auto-generated config at `~/.agentsight/config.toml` on first run
-- Compiled-in default pricing with user override support
-- `diagnose` subcommand for session efficiency analysis
