@@ -2,6 +2,8 @@
 
 Token attribution and session intelligence for [Claude Code](https://docs.anthropic.com/en/docs/claude-code). Parses session logs from `~/.claude/projects/` and surfaces usage analytics, cache efficiency metrics, and optional cost estimation — as a CLI and a web dashboard.
 
+**Tutorials and guides:** [agentsight.org](https://agentsight.org/)
+
 ## What it does
 
 Claude Code writes a JSONL log for every session. AgentSight reads those logs (never modifies them) and answers questions like:
@@ -12,6 +14,12 @@ Claude Code writes a JSONL log for every session. AgentSight reads those logs (n
 - Am I stuck in bash retry loops?
 
 ## Installation
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap RealNerd/agentsight && brew install agentsight
+```
 
 ### From source (requires Rust toolchain)
 
@@ -27,6 +35,17 @@ cargo install --path .
 agentsight --version
 agentsight health        # Check environment and baseline usage
 ```
+
+### Install Claude Code slash commands (optional)
+
+AgentSight ships with built-in slash commands (e.g. `/agentsight-diagnose`). To install them into Claude Code:
+
+```bash
+agentsight install-skill          # Install all skills
+agentsight install-skill --list   # See available skills
+```
+
+This writes skill files to `~/.claude/commands/`. Re-run with `--force` after upgrading to pick up new versions.
 
 ## Quick start
 
