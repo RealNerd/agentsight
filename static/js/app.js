@@ -122,7 +122,7 @@ async function renderOverview() {
         renderInsights(summary, todaySummary);
 
     } catch (err) {
-        app.innerHTML = `<div class="empty-state">Error loading overview: ${err.message}</div>`;
+        app.innerHTML = `<div class="empty-state">Error loading overview: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -146,7 +146,7 @@ function renderInsights(summary, todaySummary) {
         if (dominant) {
             insights.push({
                 icon: 'info',
-                text: `${dominant.project} accounts for ${dominant.pct.toFixed(1)}% of all tokens.`
+                text: `${escapeHtml(dominant.project)} accounts for ${dominant.pct.toFixed(1)}% of all tokens.`
             });
         }
     }
@@ -213,7 +213,7 @@ async function renderSessionsList() {
                 <label>Project</label>
                 <select id="filter-project">
                     <option value="">All</option>
-                    ${projects.map(p => `<option value="${p}">${p}</option>`).join('')}
+                    ${projects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}
                 </select>
             </div>
             <div id="sessions-table"><div class="loading">Loading...</div></div>
@@ -233,7 +233,7 @@ async function renderSessionsList() {
         await loadSessions();
 
     } catch (err) {
-        app.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+        app.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -256,8 +256,8 @@ function renderSessionsTable(data, showCost) {
     });
 
     const columns = [
-        { key: 'session', label: 'Session', sortValue: r => (r._label || '').toLowerCase(), format: r => r._label },
-        { key: 'project', label: 'Project', sortValue: r => shortenProject(r.project).toLowerCase(), format: r => shortenProject(r.project) },
+        { key: 'session', label: 'Session', sortValue: r => (r._label || '').toLowerCase(), format: r => escapeHtml(r._label) },
+        { key: 'project', label: 'Project', sortValue: r => shortenProject(r.project).toLowerCase(), format: r => escapeHtml(shortenProject(r.project)) },
         { key: 'date', label: 'Date', sortValue: r => r.start_time || '', format: r => formatDate(r.start_time) },
         { key: 'model', label: 'Model', sortValue: r => (r.model || '').toLowerCase(), format: r => shortenModel(r.model) },
         { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens.total, format: r => formatTokens(r.tokens.total) },
@@ -303,15 +303,15 @@ async function renderSessionDetail(id) {
             <a href="#/sessions" class="back-link">&larr; Back to sessions</a>
 
             <div class="session-header">
-                <h2 style="margin-bottom: 0.75rem;">${s.slug || s.session_id.slice(0, 8)}</h2>
+                <h2 style="margin-bottom: 0.75rem;">${escapeHtml(s.slug || s.session_id.slice(0, 8))}</h2>
                 <div class="session-meta">
                     <div class="meta-item">
                         <div class="meta-label">Session ID</div>
-                        <div>${s.session_id}</div>
+                        <div>${escapeHtml(s.session_id)}</div>
                     </div>
                     <div class="meta-item">
                         <div class="meta-label">Project</div>
-                        <div>${s.project}</div>
+                        <div>${escapeHtml(s.project)}</div>
                     </div>
                     <div class="meta-item">
                         <div class="meta-label">Date</div>
@@ -319,9 +319,9 @@ async function renderSessionDetail(id) {
                     </div>
                     <div class="meta-item">
                         <div class="meta-label">Model</div>
-                        <div>${s.model || 'unknown'}</div>
+                        <div>${escapeHtml(s.model || 'unknown')}</div>
                     </div>
-                    ${s.git_branch ? `<div class="meta-item"><div class="meta-label">Branch</div><div>${s.git_branch}</div></div>` : ''}
+                    ${s.git_branch ? `<div class="meta-item"><div class="meta-label">Branch</div><div>${escapeHtml(s.git_branch)}</div></div>` : ''}
                     <div class="meta-item">
                         <div class="meta-label">Turns</div>
                         <div>${s.turns}</div>
@@ -455,7 +455,7 @@ async function renderSessionDetail(id) {
         }
 
     } catch (err) {
-        app.innerHTML = `<div class="empty-state">Error loading session: ${err.message}</div>`;
+        app.innerHTML = `<div class="empty-state">Error loading session: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -482,7 +482,7 @@ async function renderSummaryPage() {
                 <label>Project</label>
                 <select id="summary-project">
                     <option value="">All</option>
-                    ${projects.map(p => `<option value="${p}">${p}</option>`).join('')}
+                    ${projects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}
                 </select>
             </div>
             <div id="summary-content"><div class="loading">Loading...</div></div>
@@ -501,7 +501,7 @@ async function renderSummaryPage() {
         await loadSummary();
 
     } catch (err) {
-        app.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+        app.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -611,7 +611,7 @@ function renderSummaryContent(data, showCost) {
     const projContainer = document.getElementById('summary-by-project');
     if (projContainer && data.by_project.length > 0) {
         const projCols = [
-            { key: 'project', label: 'Project', sortValue: r => r.project.toLowerCase(), format: r => r.project },
+            { key: 'project', label: 'Project', sortValue: r => r.project.toLowerCase(), format: r => escapeHtml(r.project) },
             { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens, format: r => formatTokens(r.tokens) },
             { key: 'sessions', label: 'Sessions', align: 'right', sortValue: r => r.sessions, format: r => r.sessions },
             { key: 'pct', label: '%', align: 'right', sortValue: r => r.pct, format: r => r.pct.toFixed(1) + '%' },
@@ -626,7 +626,7 @@ function renderSummaryContent(data, showCost) {
     const modelContainer = document.getElementById('summary-by-model');
     if (modelContainer && data.by_model.length > 0) {
         const modelCols = [
-            { key: 'model', label: 'Model', sortValue: r => r.model.toLowerCase(), format: r => r.model },
+            { key: 'model', label: 'Model', sortValue: r => r.model.toLowerCase(), format: r => escapeHtml(r.model) },
             { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens, format: r => formatTokens(r.tokens) },
             { key: 'pct', label: '%', align: 'right', sortValue: r => r.pct, format: r => r.pct.toFixed(1) + '%' },
         ];
@@ -663,7 +663,7 @@ async function renderTimelinePage() {
                 <label>Project</label>
                 <select id="tl-project">
                     <option value="">All</option>
-                    ${projects.map(p => `<option value="${p}">${p}</option>`).join('')}
+                    ${projects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}
                 </select>
                 <span id="tl-peak" style="margin-left: auto; color: var(--text-muted); font-size: 0.85rem;"></span>
             </div>
@@ -683,7 +683,7 @@ async function renderTimelinePage() {
         await loadTimeline();
 
     } catch (err) {
-        app.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+        app.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -817,7 +817,7 @@ function renderGanttChart(data, projectColors, showCost) {
 
     // Session bars
     for (const project of projectOrder) {
-        html += `<div class="gantt-project-label">${project}</div>`;
+        html += `<div class="gantt-project-label">${escapeHtml(project)}</div>`;
 
         for (const s of byProject[project]) {
             const startMs = new Date(s.start_time).getTime();
@@ -831,13 +831,13 @@ function renderGanttChart(data, projectColors, showCost) {
             const tokenStr = formatTokens(s.tokens);
             const cacheStr = formatPercent(s.cache_hit_ratio);
             const costStr = showCost && s.cost != null ? ' | ' + formatCost(s.cost) : '';
-            const tooltip = `${label} — ${tokenStr} tokens, ${durationStr}, cache ${cacheStr}${costStr}`;
+            const tooltip = escapeHtml(`${label} — ${tokenStr} tokens, ${durationStr}, cache ${cacheStr}${costStr}`);
 
             html += `<div class="gantt-row">
                 <div class="gantt-bar" style="left:${left}%;width:${width}%;background:${color}"
                      title="${tooltip}"
-                     onclick="window.location.hash='#/session/${s.session_id}'">
-                    ${width > 8 ? `<span class="gantt-bar-label">${label}</span>` : ''}
+                     onclick="window.location.hash='#/session/${escapeHtml(s.session_id)}'">
+                    ${width > 8 ? `<span class="gantt-bar-label">${escapeHtml(label)}</span>` : ''}
                 </div>
             </div>`;
         }
@@ -1028,11 +1028,11 @@ function renderWatchTable(snapshot, showCost) {
                         ? new Date(s.start_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})
                         : '';
                     return `
-                    <tr class="clickable-row" onclick="window.location.hash='#/session/${s.session_id}'">
-                        <td>${label}</td>
-                        <td>${shortenProject(s.project)}</td>
+                    <tr class="clickable-row" onclick="window.location.hash='#/session/${escapeHtml(s.session_id)}'">
+                        <td>${escapeHtml(label)}</td>
+                        <td>${escapeHtml(shortenProject(s.project))}</td>
                         <td class="mono">${started}</td>
-                        <td>${shortenModel(s.model)}</td>
+                        <td>${escapeHtml(shortenModel(s.model))}</td>
                         <td class="right mono">${formatTokens(s.tokens.total)}</td>
                         ${showCost ? `<td class="right mono">${s.cost ? formatCost(s.cost.total) : ''}</td>` : ''}
                         <td class="right mono">${formatPercent(s.cache_hit_ratio)}</td>
@@ -1074,7 +1074,7 @@ async function renderDiagnosePage() {
                 <label>Project</label>
                 <select id="diag-project">
                     <option value="">All</option>
-                    ${projects.map(p => `<option value="${p}">${p}</option>`).join('')}
+                    ${projects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('')}
                 </select>
                 <label class="filter-checkbox">
                     <input type="checkbox" id="diag-context"> CLAUDE.md
@@ -1098,7 +1098,7 @@ async function renderDiagnosePage() {
         await loadDiagnose();
 
     } catch (err) {
-        app.innerHTML = `<div class="empty-state">Error: ${err.message}</div>`;
+        app.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
     }
 }
 
@@ -1132,7 +1132,7 @@ function renderDiagnoseContent(data, showCost) {
             </div>
             <div class="kpi-card">
                 <div class="kpi-label">Best Project</div>
-                <div class="kpi-value accent">${best ? best.project : '—'}</div>
+                <div class="kpi-value accent">${best ? escapeHtml(best.project) : '—'}</div>
                 ${best ? `<div class="kpi-sub">Score: ${best.efficiency_score.toFixed(2)}</div>` : ''}
             </div>
         </div>
@@ -1161,7 +1161,7 @@ function renderDiagnoseContent(data, showCost) {
             ${data.claude_md.exists
                 ? `<div class="claude-md-status">
                     <span class="status-icon found">[*]</span>
-                    <span>${data.claude_md.path || ''}</span>
+                    <span>${escapeHtml(data.claude_md.path || '')}</span>
                    </div>
                    <div class="claude-md-meta">
                        ~${data.claude_md.estimated_tokens.toLocaleString()} tokens (${data.claude_md.size_bytes.toLocaleString()} bytes)
@@ -1174,7 +1174,7 @@ function renderDiagnoseContent(data, showCost) {
                    </div>`
             }
             ${data.claude_md.recommendations.length > 0
-                ? data.claude_md.recommendations.map(r => `<div class="insight-item"><span class="insight-icon warn">[!]</span><span>${r}</span></div>`).join('')
+                ? data.claude_md.recommendations.map(r => `<div class="insight-item"><span class="insight-icon warn">[!]</span><span>${escapeHtml(r)}</span></div>`).join('')
                 : ''
             }
         </div>
@@ -1186,7 +1186,7 @@ function renderDiagnoseContent(data, showCost) {
             ${data.recommendations.map(r => `
                 <div class="insight-item">
                     <span class="insight-icon warn">[!]</span>
-                    <span>${r}</span>
+                    <span>${escapeHtml(r)}</span>
                 </div>
             `).join('')}
         </div>
@@ -1199,7 +1199,7 @@ function renderDiagnoseContent(data, showCost) {
         sortableTable({
             container: rankContainer,
             columns: [
-                { key: 'project', label: 'Project', sortValue: r => r.project.toLowerCase(), format: r => r.project },
+                { key: 'project', label: 'Project', sortValue: r => r.project.toLowerCase(), format: r => escapeHtml(r.project) },
                 { key: 'sessions', label: 'Sessions', align: 'right', sortValue: r => r.session_count, format: r => r.session_count },
                 { key: 'tokens', label: 'Tokens/Sess', align: 'right', sortValue: r => r.avg_tokens_per_session, format: r => formatTokens(r.avg_tokens_per_session) },
                 { key: 'cache', label: 'Cache Hit', align: 'right', sortValue: r => r.avg_cache_hit, format: r => formatPercent(r.avg_cache_hit) },
@@ -1242,7 +1242,7 @@ function renderDiagnoseContent(data, showCost) {
                 container: trendContainer,
                 columns: [
                     { key: 'date', label: 'Date', sortValue: r => r.date || '', format: r => r.date || '—' },
-                    { key: 'slug', label: 'Session', sortValue: r => (r.slug || '').toLowerCase(), format: r => r.slug || r.session_id.slice(0, 8) },
+                    { key: 'slug', label: 'Session', sortValue: r => (r.slug || '').toLowerCase(), format: r => escapeHtml(r.slug || r.session_id.slice(0, 8)) },
                     { key: 'tokens', label: 'Tokens', align: 'right', sortValue: r => r.tokens, format: r => formatTokens(r.tokens) },
                     { key: 'cache', label: 'Cache Hit', align: 'right', sortValue: r => r.cache_hit, format: r => formatPercent(r.cache_hit) },
                     { key: 'class', label: 'Classification', sortValue: r => r.classification, format: r => r.classification },
