@@ -508,5 +508,6 @@ fn version_flag() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("agentsight"));
+        .stdout(predicate::str::contains("agentsight"))
+        .stdout(predicate::str::is_match(r"\d+\.\d+\.\d+ \(").unwrap());
 }

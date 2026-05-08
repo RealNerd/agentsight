@@ -9,7 +9,12 @@ use std::path::PathBuf;
 #[command(
     name = "agentsight",
     about = "Token attribution and session intelligence for Claude Code",
-    version
+    version,
+    long_version = concat!(
+        env!("CARGO_PKG_VERSION"), " (",
+        env!("AGENTSIGHT_GIT_HASH"), " ",
+        env!("AGENTSIGHT_BUILD_DATE"), ")"
+    )
 )]
 struct Cli {
     /// Output as JSON
