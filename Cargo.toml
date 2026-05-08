@@ -15,6 +15,7 @@ anyhow = "1"
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 comfy-table = "7"
 crossterm = "0.28"
 dirs = "6"

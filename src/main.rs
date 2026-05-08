@@ -2,7 +2,8 @@ use agentsight::commands;
 use agentsight::config;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -184,6 +185,13 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+
+    /// Generate shell completions
+    #[command(hide = true)]
+    Completions {
+        /// Shell to generate completions for
+        shell: Shell,
+    },
 }
 
 fn main() -> Result<()> {
@@ -346,6 +354,11 @@ fn main() -> Result<()> {
                 json: cli.json,
                 verbose: cli.verbose,
             })
+        }
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "agentsight", &mut std::io::stdout());
+            Ok(())
         }
     }
 }

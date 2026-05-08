@@ -511,3 +511,49 @@ fn version_flag() {
         .stdout(predicate::str::contains("agentsight"))
         .stdout(predicate::str::is_match(r"\d+\.\d+\.\d+ \(").unwrap());
 }
+
+// ── completions ──────────────────────────────────────────────────
+
+#[test]
+fn completions_bash() {
+    agentsight()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("agentsight"));
+}
+
+#[test]
+fn completions_zsh() {
+    agentsight()
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("agentsight"));
+}
+
+#[test]
+fn completions_fish() {
+    agentsight()
+        .args(["completions", "fish"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("agentsight"));
+}
+
+#[test]
+fn completions_hidden_from_help() {
+    agentsight()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("completions").not());
+}
+
+#[test]
+fn completions_invalid_shell() {
+    agentsight()
+        .args(["completions", "nushell"])
+        .assert()
+        .failure();
+}
