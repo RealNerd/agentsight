@@ -557,3 +557,42 @@ fn completions_invalid_shell() {
         .assert()
         .failure();
 }
+
+// ── help examples ────────────────────────────────────────────────
+
+#[test]
+fn sessions_help_shows_examples() {
+    agentsight()
+        .args(["sessions", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Examples:"));
+}
+
+#[test]
+fn session_help_shows_examples() {
+    agentsight()
+        .args(["session", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Examples:"));
+}
+
+#[test]
+fn diagnose_help_shows_examples() {
+    agentsight()
+        .args(["diagnose", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Examples:"))
+        .stdout(predicate::str::contains("--with-context"));
+}
+
+#[test]
+fn health_help_shows_examples() {
+    agentsight()
+        .args(["health", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Examples:"));
+}

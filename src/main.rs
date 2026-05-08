@@ -45,6 +45,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// List recent sessions with usage summaries
+    #[command(after_help = "\
+Examples:
+  agentsight sessions                       # Last 7 days, sorted by date
+  agentsight sessions --days 30 --sort tokens
+  agentsight sessions --project myapp --limit 5
+  agentsight --json sessions                # Machine-readable output")]
     Sessions {
         /// How many days back to look
         #[arg(long, default_value_t = 7)]
@@ -64,6 +70,12 @@ enum Commands {
     },
 
     /// Drill into a single session
+    #[command(after_help = "\
+Examples:
+  agentsight session abc123                 # By UUID prefix
+  agentsight session my-project/abc123      # By slug
+  agentsight --json session abc123          # Machine-readable output
+  agentsight --cost session abc123          # Include cost estimates")]
     Session {
         /// Session slug, UUID prefix, or index
         identifier: String,
@@ -74,6 +86,12 @@ enum Commands {
     },
 
     /// Cross-session aggregation and trends
+    #[command(after_help = "\
+Examples:
+  agentsight summary                        # Last 7 days
+  agentsight summary --days 30 --project myapp
+  agentsight summary --by-model             # Per-model breakdown
+  agentsight summary --by-model --group-family")]
     Summary {
         /// Period to summarize in days
         #[arg(long, default_value_t = 7)]
@@ -93,6 +111,12 @@ enum Commands {
     },
 
     /// Live-watch all active sessions
+    #[command(after_help = "\
+Examples:
+  agentsight watch                          # Watch all active sessions
+  agentsight watch --session abc123         # Filter to one session
+  agentsight watch --idle-timeout 60        # Exit after 60s idle
+  agentsight watch --active-window 30       # Hide sessions idle >30s")]
     Watch {
         /// Filter to sessions matching this prefix
         #[arg(long)]
@@ -108,6 +132,12 @@ enum Commands {
     },
 
     /// Show session timeline with concurrency analysis
+    #[command(after_help = "\
+Examples:
+  agentsight timeline                       # Today's sessions
+  agentsight timeline --days 7              # Last week
+  agentsight timeline --project myapp       # Filter by project
+  agentsight --json timeline                # Machine-readable output")]
     Timeline {
         /// How many days back to look
         #[arg(long, default_value_t = 1)]
@@ -119,6 +149,12 @@ enum Commands {
     },
 
     /// Diagnose session efficiency and suggest improvements
+    #[command(after_help = "\
+Examples:
+  agentsight diagnose abc123                # Diagnose a single session
+  agentsight diagnose                       # Project-level overview
+  agentsight diagnose --project myapp --days 30
+  agentsight diagnose --project myapp --with-context")]
     Diagnose {
         /// Session slug or UUID prefix (omit for project-level overview)
         identifier: Option<String>,
@@ -137,6 +173,11 @@ enum Commands {
     },
 
     /// Launch web dashboard
+    #[command(after_help = "\
+Examples:
+  agentsight dashboard                      # Launch on default port 3141
+  agentsight dashboard --port 8080          # Custom port
+  agentsight dashboard --no-open            # Don't auto-open browser")]
     Dashboard {
         /// Port to serve on
         #[arg(long, default_value_t = 3141)]
@@ -148,6 +189,12 @@ enum Commands {
     },
 
     /// Sanitize a session JSONL file for use as a test fixture
+    #[command(after_help = "\
+Examples:
+  agentsight sanitize abc123                # Sanitize to stdout
+  agentsight sanitize abc123 -o fixture.jsonl
+  agentsight sanitize abc123 --max-lines 50 # Truncate output
+  agentsight sanitize ./path/to/session.jsonl")]
     Sanitize {
         /// Session slug, UUID prefix, or path to .jsonl file
         identifier: String,
@@ -162,6 +209,12 @@ enum Commands {
     },
 
     /// Environment health check and baseline usage report
+    #[command(after_help = "\
+Examples:
+  agentsight health                         # Full health check
+  agentsight health --quick                 # Environment audit only
+  agentsight health --project myapp         # Filter baseline to project
+  agentsight --json health                  # Machine-readable output")]
     Health {
         /// Environment audit only, skip session analysis
         #[arg(long)]
@@ -173,6 +226,12 @@ enum Commands {
     },
 
     /// Install AgentSight skills as Claude Code slash commands
+    #[command(after_help = "\
+Examples:
+  agentsight install-skill                  # Install all skills
+  agentsight install-skill diagnose         # Install one skill
+  agentsight install-skill --list           # List available skills
+  agentsight install-skill --force          # Overwrite existing files")]
     InstallSkill {
         /// Skill name to install (default: install all)
         name: Option<String>,
