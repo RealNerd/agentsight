@@ -530,6 +530,16 @@ pub async fn get_diagnose(
     }))
 }
 
-pub async fn health() -> &'static str {
-    "ok"
+pub async fn health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "status": "ok",
+        "service": "agentsight",
+        "version": env!("CARGO_PKG_VERSION"),
+        "pid": std::process::id(),
+    }))
+}
+
+pub async fn shutdown(State(state): State<AppState>) -> &'static str {
+    state.shutdown_tx.notify_one();
+    "shutting down"
 }

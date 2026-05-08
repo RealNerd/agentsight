@@ -10,6 +10,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use tempfile::TempDir;
+use tokio::sync::Notify;
 use tower::ServiceExt;
 
 use agentsight::config::Config;
@@ -95,6 +96,7 @@ impl TestHarness {
             show_cost,
             watch_tx,
             cache,
+            shutdown_tx: Arc::new(Notify::new()),
         };
 
         let router = server::build_router(state);
@@ -143,9 +145,31 @@ impl TestHarness {
 #[tokio::test]
 async fn health_returns_ok() {
     let h = TestHarness::default().await;
-    let (status, body) = h.get("/api/v1/health").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(String::from_utf8_lossy(&body), "ok");
+    let json: serde_json::Value = h.get_json("/api/v1/health").await;
+    assert_eq!(json["status"], "ok");
+    assert_eq!(json["service"], "agentsight");
+    assert!(json["version"].is_string());
+    assert!(json["pid"].is_number());
+}
+
+#[tokio::test]
+async fn shutdown_triggers_notify() {
+    let h = TestHarness::default().await;
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/shutdown")
+        .body(Body::empty())
+        .unwrap();
+    let resp = h.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .to_vec();
+    assert_eq!(String::from_utf8_lossy(&body), "shutting down");
 }
 
 // ── GET /config ───────────────────────────────────────────────────

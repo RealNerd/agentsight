@@ -177,15 +177,21 @@ Examples:
 Examples:
   agentsight dashboard                      # Launch on default port 3141
   agentsight dashboard --port 8080          # Custom port
-  agentsight dashboard --no-open            # Don't auto-open browser")]
+  agentsight dashboard --port 0            # Auto-select a free port
+  agentsight dashboard --no-open            # Don't auto-open browser
+  agentsight dashboard --replace            # Replace existing instance")]
     Dashboard {
-        /// Port to serve on
+        /// Port to serve on (0 = auto-select free port)
         #[arg(long, default_value_t = 3141)]
         port: u16,
 
         /// Don't open browser automatically
         #[arg(long)]
         no_open: bool,
+
+        /// Replace existing dashboard on this port
+        #[arg(long)]
+        replace: bool,
     },
 
     /// Sanitize a session JSONL file for use as a test fixture
@@ -372,13 +378,18 @@ fn main() -> Result<()> {
                 with_context,
             },
         ),
-        Commands::Dashboard { port, no_open } => commands::dashboard::run(
+        Commands::Dashboard {
+            port,
+            no_open,
+            replace,
+        } => commands::dashboard::run(
             &claude_dir,
             &cfg,
             &commands::dashboard::DashboardArgs {
                 port,
                 no_open,
                 show_cost,
+                replace,
             },
         ),
         Commands::Sanitize {

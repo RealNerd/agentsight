@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Notify};
 
 use crate::config::Config;
 use crate::output::json::WatchSnapshotJson;
@@ -13,4 +13,5 @@ pub struct AppState {
     pub show_cost: bool,
     pub watch_tx: broadcast::Sender<WatchSnapshotJson>,
     pub cache: Arc<SessionCache>,
+    pub shutdown_tx: Arc<Notify>,
 }

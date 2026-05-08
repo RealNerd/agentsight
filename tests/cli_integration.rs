@@ -558,6 +558,17 @@ fn completions_invalid_shell() {
         .failure();
 }
 
+// ── dashboard ────────────────────────────────────────────────────
+
+#[test]
+fn dashboard_replace_flag_exists() {
+    agentsight()
+        .args(["dashboard", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--replace"));
+}
+
 // ── help examples ────────────────────────────────────────────────
 
 #[test]

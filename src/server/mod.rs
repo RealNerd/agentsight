@@ -6,7 +6,7 @@ pub mod watcher;
 
 use axum::http::{header, HeaderValue, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use rust_embed::Embed;
 
@@ -34,7 +34,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/timeline", get(handlers::get_timeline))
         .route("/diagnose", get(handlers::get_diagnose))
         .route("/watch/stream", get(sse::watch_stream))
-        .route("/health", get(handlers::health));
+        .route("/health", get(handlers::health))
+        .route("/shutdown", post(handlers::shutdown));
 
     Router::new()
         .nest("/api/v1", api)
@@ -71,19 +72,36 @@ async fn static_handler(uri: Uri) -> Response {
 }
 
 /// Start the server on the given port.
-pub async fn start_server(state: AppState, port: u16) -> anyhow::Result<()> {
+///
+/// When `port` is 0, the OS assigns an ephemeral port. The actual URL is
+/// printed after binding. When `open_browser` is true, the browser is
+/// opened after a short delay.
+pub async fn start_server(state: AppState, port: u16, open_browser: bool) -> anyhow::Result<()> {
+    let shutdown_notify = state.shutdown_tx.clone();
     let app = build_router(state);
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await?;
-    eprintln!("Dashboard running at http://127.0.0.1:{}", port);
+    let local_addr = listener.local_addr()?;
+    let url = format!("http://127.0.0.1:{}", local_addr.port());
+    eprintln!("Dashboard running at {}", url);
+
+    if open_browser {
+        let open_url = url;
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            let _ = open::that(open_url);
+        });
+    }
+
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(shutdown_notify))
         .await?;
     Ok(())
 }
 
-async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for ctrl-c");
+async fn shutdown_signal(notify: std::sync::Arc<tokio::sync::Notify>) {
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = notify.notified() => {}
+    }
     eprintln!("\nShutting down dashboard server...");
 }
