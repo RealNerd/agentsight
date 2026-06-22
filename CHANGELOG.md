@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-22
+
 ### Added
 - `/clear` advisor: tells you when a session has grown large and stopped earning its keep, so you know when to run `/clear` in Claude Code
   - Post-session verdict in `diagnose` (text + `--json` `clear_advice` block) with the reasons that drove it
