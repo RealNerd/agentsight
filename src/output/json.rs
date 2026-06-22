@@ -110,29 +110,41 @@ pub fn print_session_json(
 #[derive(Serialize, Clone)]
 pub struct WatchSnapshotJson {
     pub timestamp: String,
-    pub active_sessions: Vec<SessionJson>,
+    pub active_sessions: Vec<WatchSessionJson>,
     pub total_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_cost: Option<f64>,
 }
 
+/// One session in a watch snapshot: the usual session fields plus the live
+/// /clear advisor verdict.
+#[derive(Serialize, Clone)]
+pub struct WatchSessionJson {
+    #[serde(flatten)]
+    pub session: SessionJson,
+    pub clear_advice: ClearAdviceJson,
+}
+
 /// Print a watch snapshot as a single NDJSON line to stdout.
 pub fn print_watch_snapshot_json(
-    sessions: &[(SessionSummary, CostBreakdown, f64)],
+    sessions: &[(SessionSummary, CostBreakdown, f64, ClearAdviceJson)],
     show_cost: bool,
 ) {
-    let active: Vec<SessionJson> = sessions
+    let active: Vec<WatchSessionJson> = sessions
         .iter()
-        .map(|(s, c, hit)| session_to_json(s, c, *hit, show_cost))
+        .map(|(s, c, hit, advice)| WatchSessionJson {
+            session: session_to_json(s, c, *hit, show_cost),
+            clear_advice: advice.clone(),
+        })
         .collect();
 
     let total_tokens: u64 = sessions
         .iter()
-        .map(|(s, _, _)| s.total_usage.total_tokens())
+        .map(|(s, _, _, _)| s.total_usage.total_tokens())
         .sum();
 
     let total_cost = if show_cost {
-        Some(sessions.iter().map(|(_, c, _)| c.total()).sum())
+        Some(sessions.iter().map(|(_, c, _, _)| c.total()).sum())
     } else {
         None
     };
@@ -328,7 +340,23 @@ pub struct DiagnoseJson {
     pub same_error_retries: Option<Vec<BashRetryJson>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_distribution: Option<Vec<ModelDistributionJson>>,
+    pub clear_advice: ClearAdviceJson,
     pub recommendations: Vec<String>,
+}
+
+/// "Should I /clear?" verdict for a session.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ClearAdviceJson {
+    /// "healthy" | "consider" | "recommend"
+    pub urgency: String,
+    pub current_context_tokens: u64,
+    pub peak_context_tokens: u64,
+    pub context_window: u64,
+    /// Fraction of the window currently filled (0.0–1.0+).
+    pub context_fraction: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub churn_onset_turn: Option<usize>,
+    pub reasons: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]

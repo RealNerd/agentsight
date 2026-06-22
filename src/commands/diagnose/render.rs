@@ -10,6 +10,7 @@ use super::models::collect_model_distribution;
 use super::types::{
     BashRetryPattern, CacheClassification, DiagnoseData, ProjectDiagnoseData, TrendDirection,
 };
+use super::ClearUrgency;
 
 pub fn classification_str(c: &CacheClassification) -> &'static str {
     match c {
@@ -135,6 +136,27 @@ pub(super) fn render_text(
         );
     } else {
         println!(" Context size remained stable across the session.");
+    }
+
+    // /clear Advisor
+    println!();
+    println!(" ── /clear Advisor ────────────────────────────────────────");
+    let advice = &diag.clear_advice;
+    let badge = match advice.urgency {
+        ClearUrgency::Healthy => "[ok]",
+        ClearUrgency::Consider => "[~]",
+        ClearUrgency::Recommend => "[!]",
+    };
+    println!(" {} {}", badge, advice.headline());
+    println!(
+        " Context now: {} carried/turn ({:.0}% of ~{} window, peak {})",
+        output::format_tokens(advice.current_context_tokens),
+        advice.context_fraction * 100.0,
+        output::format_tokens(advice.context_window),
+        output::format_tokens(advice.peak_context_tokens),
+    );
+    for reason in &advice.reasons {
+        println!("     - {}", reason);
     }
 
     // Tool Patterns
@@ -319,6 +341,7 @@ pub(super) fn render_json(
             .as_ref()
             .map(|retries| retries.iter().map(bash_retry_to_json).collect()),
         model_distribution,
+        clear_advice: super::clear_advice_to_json(&diag.clear_advice),
         recommendations: diag.recommendations.clone(),
     };
 

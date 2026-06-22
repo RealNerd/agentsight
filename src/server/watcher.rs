@@ -4,10 +4,11 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::time::{self, Duration};
 
+use crate::commands::diagnose::{advise_clear, clear_advice_to_json, detect_context_window};
 use crate::config::Config;
 use crate::cost::calculate_usage_cost;
 use crate::cost::calculator::cache_hit_ratio;
-use crate::output::json::{session_to_json, WatchSnapshotJson};
+use crate::output::json::{session_to_json, WatchSessionJson, WatchSnapshotJson};
 use crate::parser::reader::{self, decode_project_path};
 use crate::parser::session_index;
 use crate::parser::types::SessionSummary;
@@ -120,7 +121,11 @@ pub async fn run_watcher(
                 .map(|ws| {
                     let s = ws.summary.as_ref().unwrap();
                     let c = ws.cost.clone().unwrap_or_default();
-                    session_to_json(s, &c, ws.cache_hit, show_cost)
+                    let advice = advise_clear(&s.turns, detect_context_window(s.model.as_deref()));
+                    WatchSessionJson {
+                        session: session_to_json(s, &c, ws.cache_hit, show_cost),
+                        clear_advice: clear_advice_to_json(&advice),
+                    }
                 })
                 .collect();
 

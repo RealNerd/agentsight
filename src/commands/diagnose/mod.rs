@@ -1,6 +1,7 @@
 mod benchmark;
 mod cache;
 mod claude_md;
+mod clear_advisor;
 mod cli;
 mod context;
 mod errors;
@@ -25,6 +26,11 @@ pub use self::benchmark::{compute_project_benchmark, rank_benchmarks};
 pub use self::claude_md::analyze_claude_md;
 pub use self::trend::analyze_project_trend;
 pub use self::types::{CacheClassification, ProjectBenchmark, TrendDirection};
+
+// Used by watch (live) and diagnose (post-hoc) for the /clear advisor
+pub use self::clear_advisor::{
+    advise_clear, clear_advice_to_json, detect_context_window, ClearAdvice, ClearUrgency,
+};
 
 // Used by tests/diagnose_fixtures.rs
 pub use self::cache::analyze_cache_stability;
@@ -57,6 +63,10 @@ pub fn run_diagnose_with_entries(
     let context_growth = analyze_context_growth(&summary.turns);
     let tool_patterns = analyze_tool_patterns(&summary.turns);
     let same_error_retries = entries.map(detect_same_error_retries);
+    let clear_advice = advise_clear(
+        &summary.turns,
+        detect_context_window(summary.model.as_deref()),
+    );
     let recommendations = generate_recommendations(
         &cache_stability,
         &context_growth,
@@ -69,6 +79,7 @@ pub fn run_diagnose_with_entries(
         context_growth,
         tool_patterns,
         same_error_retries,
+        clear_advice,
         recommendations,
     }
 }

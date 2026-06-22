@@ -6,6 +6,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use crate::commands::diagnose::{advise_clear, detect_context_window, ClearAdvice, ClearUrgency};
 use crate::config::Config;
 use crate::cost::calculate_usage_cost;
 use crate::cost::calculator::cache_hit_ratio;
@@ -37,6 +38,8 @@ struct WatchedSession {
     summary: Option<SessionSummary>,
     cost: Option<crate::cost::CostBreakdown>,
     cache_hit: f64,
+    /// Live "should I /clear?" verdict, recomputed each time the file changes.
+    clear_advice: Option<ClearAdvice>,
 }
 
 /// Data needed to render one row in the watch table.
@@ -49,6 +52,8 @@ pub struct WatchRow {
     pub cache_hit: f64,
     pub model: Option<String>,
     pub cost: Option<f64>,
+    /// Live /clear advisor verdict for this session.
+    pub clear_urgency: ClearUrgency,
     /// "active" or "idle 2m 15s" etc.
     pub status: String,
 }
@@ -96,6 +101,7 @@ pub fn run(claude_dir: &Path, config: &Config, args: &WatchArgs) -> Result<()> {
                                 summary: None,
                                 cost: None,
                                 cache_hit: 0.0,
+                                clear_advice: None,
                             },
                         );
                     }
@@ -147,6 +153,10 @@ pub fn run(claude_dir: &Path, config: &Config, args: &WatchArgs) -> Result<()> {
 
                     ws.cost = Some(cost);
                     ws.cache_hit = hit;
+                    ws.clear_advice = Some(advise_clear(
+                        &summary.turns,
+                        detect_context_window(summary.model.as_deref()),
+                    ));
                     ws.summary = Some(summary);
                 }
             }
@@ -164,7 +174,17 @@ pub fn run(claude_dir: &Path, config: &Config, args: &WatchArgs) -> Result<()> {
                     .filter_map(|ws| {
                         let s = ws.summary.as_ref()?;
                         let c = ws.cost.clone().unwrap_or_default();
-                        Some((s.clone_for_json(), c, ws.cache_hit))
+                        let advice = ws
+                            .clear_advice
+                            .as_ref()
+                            .map(crate::commands::diagnose::clear_advice_to_json)
+                            .unwrap_or_else(|| {
+                                crate::commands::diagnose::clear_advice_to_json(&advise_clear(
+                                    &[],
+                                    detect_context_window(s.model.as_deref()),
+                                ))
+                            });
+                        Some((s.clone_for_json(), c, ws.cache_hit, advice))
                     })
                     .collect();
 
@@ -231,6 +251,11 @@ fn build_rows(
                 } else {
                     None
                 },
+                clear_urgency: ws
+                    .clear_advice
+                    .as_ref()
+                    .map(|a| a.urgency.clone())
+                    .unwrap_or(ClearUrgency::Healthy),
                 status,
             }
         })
@@ -284,11 +309,11 @@ pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
 
     if show_cost {
         table.set_header(vec![
-            "Project", "Session", "Tokens", "Turns", "Cache", "Model", "Cost", "Status",
+            "Project", "Session", "Tokens", "Turns", "Cache", "Clear?", "Model", "Cost", "Status",
         ]);
     } else {
         table.set_header(vec![
-            "Project", "Session", "Tokens", "Turns", "Cache", "Model", "Status",
+            "Project", "Session", "Tokens", "Turns", "Cache", "Clear?", "Model", "Status",
         ]);
     }
 
@@ -297,6 +322,7 @@ pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
         let session = session_label(row, rows);
         let model = row.model.as_deref().unwrap_or("unknown");
 
+        let clear = row.clear_urgency.label();
         if show_cost {
             table.add_row(vec![
                 Cell::new(&project),
@@ -304,6 +330,7 @@ pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
                 Cell::new(format_tokens(row.tokens)),
                 Cell::new(row.turns.to_string()),
                 Cell::new(format_percent(row.cache_hit)),
+                Cell::new(clear),
                 Cell::new(shorten_model(model)),
                 Cell::new(format_cost(row.cost.unwrap_or(0.0))),
                 Cell::new(&row.status),
@@ -315,6 +342,7 @@ pub fn render_watch_table(rows: &[WatchRow], show_cost: bool) -> String {
                 Cell::new(format_tokens(row.tokens)),
                 Cell::new(row.turns.to_string()),
                 Cell::new(format_percent(row.cache_hit)),
+                Cell::new(clear),
                 Cell::new(shorten_model(model)),
                 Cell::new(&row.status),
             ]);
@@ -393,6 +421,7 @@ mod tests {
             cache_hit: 0.75,
             model: Some("claude-opus-4-6".to_string()),
             cost: if show_cost { Some(1.23) } else { None },
+            clear_urgency: ClearUrgency::Healthy,
             status: "active".to_string(),
         }
     }
@@ -429,6 +458,21 @@ mod tests {
     }
 
     #[test]
+    fn test_render_shows_clear_column() {
+        let mut row = make_row("/Users/me/project", 50_000, 10, false);
+        row.clear_urgency = ClearUrgency::Recommend;
+        let output = render_watch_table(&[row], false);
+        assert!(
+            output.contains("Clear?"),
+            "header should have Clear? column"
+        );
+        assert!(
+            output.contains("CLEAR"),
+            "a Recommend session should show the CLEAR badge"
+        );
+    }
+
+    #[test]
     fn test_render_with_cost() {
         let rows = vec![make_row("/Users/me/project", 50_000, 10, true)];
         let output = render_watch_table(&rows, true);
@@ -458,6 +502,7 @@ mod tests {
                 }),
                 cost: Some(crate::cost::CostBreakdown::default()),
                 cache_hit: 0.5,
+                clear_advice: None,
             },
         );
 
@@ -478,6 +523,7 @@ mod tests {
                 }),
                 cost: Some(crate::cost::CostBreakdown::default()),
                 cache_hit: 0.3,
+                clear_advice: None,
             },
         );
 
@@ -498,6 +544,7 @@ mod tests {
                 }),
                 cost: Some(crate::cost::CostBreakdown::default()),
                 cache_hit: 0.0,
+                clear_advice: None,
             },
         );
 
@@ -552,6 +599,7 @@ mod tests {
                     }),
                     cost: Some(crate::cost::CostBreakdown::default()),
                     cache_hit: 0.0,
+                    clear_advice: None,
                 },
             );
         }

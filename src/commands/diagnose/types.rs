@@ -21,6 +21,8 @@ pub struct DiagnoseData {
     /// Same-error retries detected from entry-level analysis.
     /// None when entry-level analysis is not available (project-level path).
     pub same_error_retries: Option<Vec<BashRetry>>,
+    /// Verdict on whether this session should be `/clear`ed, and why.
+    pub clear_advice: super::clear_advisor::ClearAdvice,
     pub recommendations: Vec<String>,
 }
 
