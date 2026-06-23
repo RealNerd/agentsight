@@ -3,11 +3,12 @@
 //! Uses `tower::ServiceExt::oneshot()` to send requests directly to the Router
 //! without binding a TCP socket — the standard axum testing pattern.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use http_body_util::BodyExt;
 use tempfile::TempDir;
 use tokio::sync::Notify;
@@ -20,6 +21,82 @@ use agentsight::output::json::{
 use agentsight::server::cache::SessionCache;
 use agentsight::server::state::AppState;
 use agentsight::server::{self};
+
+// ── Fixture materialization ───────────────────────────────────────
+
+/// The newest event in any fixture is shifted to land this many days before
+/// "now". Fixtures carry hard-coded mid-2025 timestamps, but the server clamps
+/// date queries to `MAX_DAYS` (365) and drops anything older. Left as-is, the
+/// fixtures silently age out of every window as the wall-clock advances and the
+/// suite rots. Shifting keeps them recent enough to fall inside broad queries
+/// yet old enough that `days=1` still excludes them — chosen well above 1 to
+/// leave headroom for the slowest CI run.
+const NEWEST_AGE_DAYS: i64 = 3;
+
+/// Parse every top-level RFC3339 `timestamp` value in a JSONL fixture body.
+fn fixture_timestamps(body: &str) -> impl Iterator<Item = DateTime<Utc>> + '_ {
+    body.lines().filter_map(|line| {
+        let v: serde_json::Value = serde_json::from_str(line).ok()?;
+        let raw = v.get("timestamp")?.as_str()?;
+        DateTime::parse_from_rfc3339(raw)
+            .ok()
+            .map(|d| d.with_timezone(&Utc))
+    })
+}
+
+/// Shift a single JSONL line's `timestamp` field by `offset`, leaving the rest
+/// of the line byte-for-byte intact (and passing through lines without one).
+fn shift_line(line: &str, offset: Duration) -> String {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+        return line.to_string();
+    };
+    let Some(raw) = v.get("timestamp").and_then(|t| t.as_str()) else {
+        return line.to_string();
+    };
+    let Ok(dt) = DateTime::parse_from_rfc3339(raw) else {
+        return line.to_string();
+    };
+    let shifted = (dt.with_timezone(&Utc) + offset).to_rfc3339_opts(SecondsFormat::Secs, true);
+    line.replace(&format!("\"{raw}\""), &format!("\"{shifted}\""))
+}
+
+/// Copy `(src, dest)` fixtures into the temp Claude dir, shifting every
+/// timestamp by one constant offset so the most recent event across all
+/// fixtures lands `NEWEST_AGE_DAYS` before now. A single shared offset keeps
+/// the relative timing within and across sessions intact (timeline concurrency,
+/// per-project trends) while making date-window behavior independent of when
+/// the suite runs.
+fn materialize_fixtures(specs: &[(PathBuf, PathBuf)]) {
+    let bodies: Vec<(String, &Path)> = specs
+        .iter()
+        .map(|(src, dest)| {
+            (
+                std::fs::read_to_string(src).expect("read fixture"),
+                dest.as_path(),
+            )
+        })
+        .collect();
+
+    let newest = bodies
+        .iter()
+        .flat_map(|(body, _)| fixture_timestamps(body))
+        .max()
+        .expect("fixtures contain at least one timestamp");
+
+    let target = Utc::now() - Duration::days(NEWEST_AGE_DAYS);
+    // Whole-second offset keeps shifted values on clean second boundaries.
+    let offset = Duration::seconds((target - newest).num_seconds());
+
+    for (body, dest) in &bodies {
+        let mut shifted: String = body
+            .lines()
+            .map(|line| shift_line(line, offset))
+            .collect::<Vec<_>>()
+            .join("\n");
+        shifted.push('\n');
+        std::fs::write(dest, shifted).expect("write fixture");
+    }
+}
 
 // ── Test harness ──────────────────────────────────────────────────
 
@@ -52,26 +129,23 @@ impl TestHarness {
             .join("tests")
             .join("fixtures");
 
-        // short_session.jsonl → project-alpha, UUID ...0001
-        std::fs::copy(
-            fixtures.join("short_session.jsonl"),
-            alpha_dir.join("00000000-0000-0000-0000-000000000001.jsonl"),
-        )
-        .unwrap();
-
-        // multi_model.jsonl → project-alpha, UUID ...0004
-        std::fs::copy(
-            fixtures.join("multi_model.jsonl"),
-            alpha_dir.join("00000000-0000-0000-0000-000000000004.jsonl"),
-        )
-        .unwrap();
-
-        // normal_mixed_tools.jsonl → project-beta, UUID ...0010
-        std::fs::copy(
-            fixtures.join("normal_mixed_tools.jsonl"),
-            beta_dir.join("00000000-0000-0000-0000-000000000010.jsonl"),
-        )
-        .unwrap();
+        // short_session.jsonl   → project-alpha, UUID ...0001
+        // multi_model.jsonl     → project-alpha, UUID ...0004
+        // normal_mixed_tools    → project-beta,  UUID ...0010
+        materialize_fixtures(&[
+            (
+                fixtures.join("short_session.jsonl"),
+                alpha_dir.join("00000000-0000-0000-0000-000000000001.jsonl"),
+            ),
+            (
+                fixtures.join("multi_model.jsonl"),
+                alpha_dir.join("00000000-0000-0000-0000-000000000004.jsonl"),
+            ),
+            (
+                fixtures.join("normal_mixed_tools.jsonl"),
+                beta_dir.join("00000000-0000-0000-0000-000000000010.jsonl"),
+            ),
+        ]);
 
         Self::build(tmp, claude_dir, show_cost).await
     }
@@ -229,9 +303,12 @@ async fn sessions_respects_limit() {
 #[tokio::test]
 async fn sessions_date_filter_excludes_old() {
     let h = TestHarness::default().await;
-    // Fixtures are from June 2025 — days=1 should exclude them all
+    // Fixtures are shifted to ~3 days old (NEWEST_AGE_DAYS) — days=1 excludes all
     let list: SessionListJson = h.get_json("/api/v1/sessions?days=1").await;
-    assert_eq!(list.session_count, 0, "days=1 should exclude 2025 fixtures");
+    assert_eq!(
+        list.session_count, 0,
+        "days=1 should exclude older fixtures"
+    );
 }
 
 #[tokio::test]
